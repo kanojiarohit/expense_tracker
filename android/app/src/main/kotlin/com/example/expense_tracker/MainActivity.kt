@@ -16,7 +16,9 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val smsPermissionRequestCode = 901
+    private val notificationPermissionRequestCode = 902
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private var pendingNotificationPermissionResult: MethodChannel.Result? = null
 
     companion object {
         private const val notificationChannelId = "provisional_transactions"
@@ -76,6 +78,8 @@ class MainActivity : FlutterActivity() {
                     launchProvisionalRequested = false
                     result.success(requested)
                 }
+                "hasNotificationPermission" -> result.success(hasNotificationPermission())
+                "requestNotificationPermission" -> requestNotificationPermission(result)
                 else -> result.notImplemented()
             }
         }
@@ -106,20 +110,49 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun hasNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return true
+        }
+        return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestNotificationPermission(result: MethodChannel.Result) {
+        if (hasNotificationPermission()) {
+            result.success(true)
+            return
+        }
+        pendingNotificationPermissionResult?.success(false)
+        pendingNotificationPermissionResult = result
+        requestPermissions(
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            notificationPermissionRequestCode,
+        )
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != smsPermissionRequestCode) {
-            return
+        when (requestCode) {
+            smsPermissionRequestCode -> {
+                pendingPermissionResult?.success(
+                    grantResults.isNotEmpty() &&
+                        grantResults.first() == PackageManager.PERMISSION_GRANTED,
+                )
+                pendingPermissionResult = null
+            }
+            notificationPermissionRequestCode -> {
+                pendingNotificationPermissionResult?.success(
+                    grantResults.isNotEmpty() &&
+                        grantResults.first() == PackageManager.PERMISSION_GRANTED,
+                )
+                pendingNotificationPermissionResult = null
+            }
         }
-        pendingPermissionResult?.success(
-            grantResults.isNotEmpty() &&
-                grantResults.first() == PackageManager.PERMISSION_GRANTED,
-        )
-        pendingPermissionResult = null
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -164,13 +197,16 @@ class MainActivity : FlutterActivity() {
             Notification.Builder(this)
         }
         val notification = builder
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Provisional transactions pending")
             .setContentText("You have $count transaction SMS to review")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setAutoCancel(false)
             .build()
+            .apply {
+                flags = flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
+            }
         manager.notify(notificationId, notification)
     }
 

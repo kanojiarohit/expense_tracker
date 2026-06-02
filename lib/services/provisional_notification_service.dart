@@ -23,4 +23,20 @@ class ProvisionalNotificationService {
     }
     return await _channel.invokeMethod<bool>('consumeLaunchRequest') ?? false;
   }
+
+  Future<bool> hasPermission() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return true;
+    }
+    return await _channel.invokeMethod<bool>('hasNotificationPermission') ??
+        false;
+  }
+
+  Future<bool> requestPermission() async {
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return true;
+    }
+    return await _channel.invokeMethod<bool>('requestNotificationPermission') ??
+        false;
+  }
 }

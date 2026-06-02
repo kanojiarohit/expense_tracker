@@ -97,7 +97,7 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final SmsTransactionService _smsTransactionService = SmsTransactionService();
   final ProvisionalTransactionRepository _provisionalRepository =
       ProvisionalTransactionRepository();
@@ -106,17 +106,27 @@ class _AppShellState extends State<AppShell> {
   int _selectedIndex = 0;
   int _reloadToken = 0;
   int _provisionalCount = 0;
+  bool _showNotificationSplash = false;
+  bool _handlingNotificationLaunch = false;
   DateTime _selectedMonth = DateTime(DateTime.now().year, DateTime.now().month);
   StreamSubscription<ParsedSmsTransaction>? _smsSubscription;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _syncProvisionalCount();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _maybeOpenFromNotification();
+      _handleNotificationLaunch();
       _syncSmsImportWithSettings();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _handleNotificationLaunch();
+    }
   }
 
   @override
@@ -130,6 +140,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _smsSubscription?.cancel();
     super.dispose();
   }
@@ -150,7 +161,7 @@ class _AppShellState extends State<AppShell> {
   Future<void> _stopSmsImport() async {
     await _smsSubscription?.cancel();
     _smsSubscription = null;
-    await _notificationService.syncPendingCount(0);
+    await _syncProvisionalCount();
   }
 
   Future<void> _syncSmsImportWithSettings() async {
@@ -204,9 +215,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _syncProvisionalCount() async {
     final count = await _provisionalRepository.pendingCount();
-    await _notificationService.syncPendingCount(
-      widget.settings.smsImportEnabled ? count : 0,
-    );
+    await _notificationService.syncPendingCount(count);
     if (!mounted) {
       return;
     }
@@ -216,11 +225,25 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  Future<void> _maybeOpenFromNotification() async {
-    final shouldOpen = await _notificationService.consumeLaunchRequest();
-    if (shouldOpen && mounted) {
-      await _openProvisionalTransactionsScreen();
+  Future<void> _handleNotificationLaunch() async {
+    if (_handlingNotificationLaunch) {
+      return;
     }
+    _handlingNotificationLaunch = true;
+    final shouldOpen = await _notificationService.consumeLaunchRequest();
+    if (!shouldOpen || !mounted) {
+      _handlingNotificationLaunch = false;
+      return;
+    }
+    setState(() => _showNotificationSplash = true);
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    if (!mounted) {
+      _handlingNotificationLaunch = false;
+      return;
+    }
+    setState(() => _showNotificationSplash = false);
+    await _openProvisionalTransactionsScreen();
+    _handlingNotificationLaunch = false;
   }
 
   Future<void> _openProvisionalTransactionsScreen() async {
@@ -329,23 +352,32 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        child: KeyedSubtree(key: ValueKey(_selectedIndex), child: _buildBody()),
-      ),
-      bottomNavigationBar: BottomNav(
-        selectedIndex: _selectedIndex,
-        onChanged: (index) {
-          setState(() {
-            _selectedIndex = index;
-            _reloadToken++;
-          });
-        },
-        onAddPressed: () => _openTransactionForm(),
-      ),
+    return Stack(
+      children: [
+        Scaffold(
+          body: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: KeyedSubtree(
+              key: ValueKey(_selectedIndex),
+              child: _buildBody(),
+            ),
+          ),
+          bottomNavigationBar: BottomNav(
+            selectedIndex: _selectedIndex,
+            onChanged: (index) {
+              setState(() {
+                _selectedIndex = index;
+                _reloadToken++;
+              });
+            },
+            onAddPressed: () => _openTransactionForm(),
+          ),
+        ),
+        if (_showNotificationSplash)
+          const Positioned.fill(child: SplashScreen()),
+      ],
     );
   }
 }

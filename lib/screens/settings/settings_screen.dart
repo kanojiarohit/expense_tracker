@@ -7,6 +7,7 @@ import '../../core/formatters.dart';
 import '../../models/app_settings.dart';
 import '../../navigation/app_route.dart';
 import '../../services/export_service.dart';
+import '../../services/provisional_notification_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/sms_transaction_service.dart';
 import '../../widgets/app_card.dart';
@@ -36,6 +37,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final SettingsService _settingsService = SettingsService();
   final SmsTransactionService _smsTransactionService = SmsTransactionService();
+  final ProvisionalNotificationService _notificationService =
+      ProvisionalNotificationService();
   bool _saving = false;
   late String _themeMode;
   late String _amountFormat;
@@ -225,6 +228,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!granted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('SMS import permission was not granted.')),
+      );
+      return;
+    }
+    var notificationGranted = await _notificationService.hasPermission();
+    if (!notificationGranted) {
+      notificationGranted = await _notificationService.requestPermission();
+    }
+    if (!mounted) {
+      return;
+    }
+    if (!notificationGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Notification permission was not granted.'),
+        ),
       );
       return;
     }
