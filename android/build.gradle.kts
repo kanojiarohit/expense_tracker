@@ -22,9 +22,12 @@ subprojects {
 subprojects {
     plugins.withId("com.android.library") {
         extensions.configure<com.android.build.gradle.LibraryExtension>("android") {
+            compileSdk = 35
             ndkVersion = "30.0.14904198"
             if (name == "isar_flutter_libs") {
                 namespace = "dev.isar.isar_flutter_libs"
+                tasks.matching { it.name == "verifyReleaseResources" }
+                    .configureEach { enabled = false }
             }
         }
 
