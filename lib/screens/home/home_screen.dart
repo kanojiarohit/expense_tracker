@@ -20,6 +20,7 @@ class HomeScreen extends StatefulWidget {
     required this.settings,
     required this.onOpenMonth,
     required this.onOpenDebtLoan,
+    required this.onOpenSpendings,
     required this.onOpenProvisionalTransactions,
     required this.onEditTransaction,
     required this.provisionalCount,
@@ -29,6 +30,7 @@ class HomeScreen extends StatefulWidget {
   final AppSettingsModel settings;
   final ValueChanged<DateTime> onOpenMonth;
   final VoidCallback onOpenDebtLoan;
+  final VoidCallback onOpenSpendings;
   final VoidCallback onOpenProvisionalTransactions;
   final ValueChanged<TransactionModel> onEditTransaction;
   final int provisionalCount;
@@ -40,7 +42,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final DashboardService _dashboardService = DashboardService();
   bool _loading = true;
-  String _period = 'month';
   DashboardData? _data;
 
   @override
@@ -85,9 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   final cardWidth = wide
                       ? (constraints.maxWidth - 44) / 2
                       : constraints.maxWidth;
-                  final spendData = _period == 'month'
-                      ? data.monthCategorySpend
-                      : data.weekCategorySpend;
                   return ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
@@ -115,11 +113,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           SizedBox(
                             width: cardWidth,
                             child: _SpendingCard(
-                              period: _period,
-                              onPeriodChanged: (value) =>
-                                  setState(() => _period = value),
-                              spendData: spendData,
+                              spendData: data.monthCategorySpend,
                               settings: widget.settings,
+                              onViewAll: widget.onOpenSpendings,
                             ),
                           ),
                           SizedBox(
@@ -288,16 +284,14 @@ class _AmountBar extends StatelessWidget {
 
 class _SpendingCard extends StatelessWidget {
   const _SpendingCard({
-    required this.period,
-    required this.onPeriodChanged,
     required this.spendData,
     required this.settings,
+    required this.onViewAll,
   });
 
-  final String period;
-  final ValueChanged<String> onPeriodChanged;
   final List<CategorySpendData> spendData;
   final AppSettingsModel settings;
+  final VoidCallback onViewAll;
 
   @override
   Widget build(BuildContext context) {
@@ -306,23 +300,11 @@ class _SpendingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: SectionHeader(
-                  title: 'Top Spending',
-                  subtitle: 'Top 5 categories',
-                ),
-              ),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'week', label: Text('Week')),
-                  ButtonSegment(value: 'month', label: Text('Month')),
-                ],
-                selected: {period},
-                onSelectionChanged: (value) => onPeriodChanged(value.first),
-              ),
-            ],
+          SectionHeader(
+            title: 'Top Spending',
+            subtitle: 'Top 5 categories',
+            actionLabel: 'View all',
+            onActionTap: onViewAll,
           ),
           const SizedBox(height: 12),
           if (spendData.isEmpty) ...[

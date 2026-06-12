@@ -30,7 +30,7 @@ class TransactionsScreen extends StatefulWidget {
 }
 
 class _TransactionsScreenState extends State<TransactionsScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final TransactionService _transactionService = TransactionService();
   final TextEditingController _searchController = TextEditingController();
 

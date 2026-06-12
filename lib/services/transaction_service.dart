@@ -34,6 +34,36 @@ class DayTransactionGroup {
   final int expenseMinor;
 }
 
+class CategorySpendingChild {
+  CategorySpendingChild({
+    required this.category,
+    required this.name,
+    required this.type,
+    required this.amountMinor,
+  });
+
+  final CategoryModel? category;
+  final String name;
+  final String type;
+  final int amountMinor;
+}
+
+class CategorySpendingGroup {
+  CategorySpendingGroup({
+    required this.parentCategory,
+    required this.name,
+    required this.type,
+    required this.totalMinor,
+    required this.children,
+  });
+
+  final CategoryModel? parentCategory;
+  final String name;
+  final String type;
+  final int totalMinor;
+  final List<CategorySpendingChild> children;
+}
+
 class DebtLoanSummary {
   DebtLoanSummary({
     required this.principal,
@@ -143,6 +173,119 @@ class TransactionService {
     }).toList();
     groups.sort((a, b) => b.date.compareTo(a.date));
     return groups;
+  }
+
+  List<CategorySpendingGroup> groupSpendingsByCategory(
+    List<TransactionRecord> records, {
+    List<CategoryModel> categories = const [],
+  }) {
+    final categoryById = <int, CategoryModel>{
+      for (final category in categories) category.id: category,
+    };
+    for (final record in records) {
+      final category = record.category;
+      final subCategory = record.subCategory;
+      if (category != null) {
+        categoryById[category.id] = category;
+      }
+      if (subCategory != null) {
+        categoryById[subCategory.id] = subCategory;
+      }
+    }
+
+    final groupMap = <String, _MutableCategorySpendingGroup>{};
+    for (final record in records) {
+      final transaction = record.transaction;
+      if (transaction.excludeFromReports ||
+          (transaction.transactionType != TransactionTypes.expense &&
+              transaction.transactionType != TransactionTypes.income)) {
+        continue;
+      }
+
+      final category = record.category;
+      final subCategory = record.subCategory;
+      final type = transaction.transactionType;
+      final childCategory = subCategory ?? _childCategoryFrom(category);
+      final resolvedParent = _parentCategoryFor(
+        category: category,
+        subCategory: subCategory,
+        categoryById: categoryById,
+      );
+      final parentName = resolvedParent?.name ?? 'Other';
+      final parentKey = '${resolvedParent?.id ?? 'other'}-$type';
+      final group = groupMap.putIfAbsent(
+        parentKey,
+        () => _MutableCategorySpendingGroup(
+          parentCategory: resolvedParent,
+          name: parentName,
+          type: type,
+        ),
+      );
+      group.totalMinor += transaction.amountMinor;
+
+      if (childCategory == null) {
+        continue;
+      }
+      final childKey = '${childCategory.id}-$type';
+      final child = group.children.putIfAbsent(
+        childKey,
+        () => CategorySpendingChild(
+          category: childCategory,
+          name: childCategory.name,
+          type: type,
+          amountMinor: 0,
+        ),
+      );
+      group.children[childKey] = CategorySpendingChild(
+        category: child.category,
+        name: child.name,
+        type: child.type,
+        amountMinor: child.amountMinor + transaction.amountMinor,
+      );
+    }
+
+    final groups = groupMap.values
+        .map(
+          (group) => CategorySpendingGroup(
+            parentCategory: group.parentCategory,
+            name: group.name,
+            type: group.type,
+            totalMinor: group.totalMinor,
+            children: group.sortedChildren,
+          ),
+        )
+        .toList();
+    groups.sort((a, b) {
+      final amountCompare = b.totalMinor.compareTo(a.totalMinor);
+      if (amountCompare != 0) {
+        return amountCompare;
+      }
+      return a.name.compareTo(b.name);
+    });
+    return groups;
+  }
+
+  CategoryModel? _childCategoryFrom(CategoryModel? category) {
+    if (category?.parentCategoryId == null) {
+      return null;
+    }
+    return category;
+  }
+
+  CategoryModel? _parentCategoryFor({
+    required CategoryModel? category,
+    required CategoryModel? subCategory,
+    required Map<int, CategoryModel> categoryById,
+  }) {
+    final childParentId = subCategory?.parentCategoryId;
+    if (childParentId != null) {
+      return categoryById[childParentId] ?? category;
+    }
+    final categoryParentId = category?.parentCategoryId;
+    if (categoryParentId != null) {
+      return categoryById[categoryParentId] ?? category;
+    }
+    return category;
   }
 
   Future<void> save(TransactionModel transaction) async {
@@ -311,5 +454,31 @@ class TransactionService {
     return transaction.transactionType == TransactionTypes.debtLoan &&
         (transaction.debtLoanKind == DebtLoanKinds.debtCollection ||
             transaction.debtLoanKind == DebtLoanKinds.loanRepayment);
+  }
+}
+
+class _MutableCategorySpendingGroup {
+  _MutableCategorySpendingGroup({
+    required this.parentCategory,
+    required this.name,
+    required this.type,
+  });
+
+  final CategoryModel? parentCategory;
+  final String name;
+  final String type;
+  int totalMinor = 0;
+  final Map<String, CategorySpendingChild> children = {};
+
+  List<CategorySpendingChild> get sortedChildren {
+    final values = children.values.toList()
+      ..sort((a, b) {
+        final amountCompare = b.amountMinor.compareTo(a.amountMinor);
+        if (amountCompare != 0) {
+          return amountCompare;
+        }
+        return a.name.compareTo(b.name);
+      });
+    return values;
   }
 }

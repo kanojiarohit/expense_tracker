@@ -16,6 +16,7 @@ import 'screens/home/home_screen.dart';
 import 'screens/settings/export_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/splash/splash_screen.dart';
+import 'screens/spendings/spendings_screen.dart';
 import 'screens/transactions/add_edit_transaction_screen.dart';
 import 'screens/transactions/provisional_transactions_screen.dart';
 import 'screens/transactions/transactions_screen.dart';
@@ -291,6 +292,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _openSpendingsScreen() async {
+    await Navigator.of(context).push<void>(
+      AppRoute(
+        builder: (_) => SpendingsScreen(
+          settings: widget.settings,
+          initialMonth: DateTime(DateTime.now().year, DateTime.now().month),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openExportScreen() async {
     await Navigator.of(
       context,
@@ -311,6 +323,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             });
           },
           onOpenDebtLoan: _openDebtLoanScreen,
+          onOpenSpendings: _openSpendingsScreen,
           onOpenProvisionalTransactions: _openProvisionalTransactionsScreen,
           onEditTransaction: (transaction) =>
               _openTransactionForm(transaction: transaction),
