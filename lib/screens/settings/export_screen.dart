@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../core/formatters.dart';
+import '../../models/category.dart';
+import '../../navigation/app_route.dart';
 import '../../services/export_service.dart';
-import '../../widgets/app_card.dart';
 import '../../widgets/app_button.dart';
+import '../../widgets/app_card.dart';
+import '../categories/select_category_screen.dart';
 
 class ExportScreen extends StatefulWidget {
   const ExportScreen({super.key});
@@ -14,15 +17,17 @@ class ExportScreen extends StatefulWidget {
 
 class _ExportScreenState extends State<ExportScreen> {
   final ExportService _exportService = ExportService();
-  DateTime _fromMonth = DateTime(DateTime.now().year, DateTime.now().month);
-  DateTime _toMonth = DateTime(DateTime.now().year, DateTime.now().month);
-  ExportMode? _exportingMode;
+  DateTime? _fromMonth;
+  DateTime? _toMonth;
+  List<CategoryModel> _selectedCategories = [];
+  bool _exporting = false;
 
   Future<void> _pickMonth({required bool isFrom}) async {
     final current = isFrom ? _fromMonth : _toMonth;
+    final now = DateTime.now();
     final picked = await showDatePicker(
       context: context,
-      initialDate: current,
+      initialDate: current ?? DateTime(now.year, now.month),
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
       helpText: isFrom ? 'Choose From Month' : 'Choose To Month',
@@ -34,25 +39,50 @@ class _ExportScreenState extends State<ExportScreen> {
     setState(() {
       if (isFrom) {
         _fromMonth = month;
-        if (_toMonth.isBefore(_fromMonth)) {
+        if (_toMonth != null && _toMonth!.isBefore(_fromMonth!)) {
           _toMonth = _fromMonth;
         }
       } else {
         _toMonth = month;
-        if (_fromMonth.isAfter(_toMonth)) {
+        if (_fromMonth != null && _fromMonth!.isAfter(_toMonth!)) {
           _fromMonth = _toMonth;
         }
       }
     });
   }
 
-  Future<void> _export(ExportMode mode) async {
-    setState(() => _exportingMode = mode);
+  Future<void> _pickCategories() async {
+    final result = await Navigator.of(context).push<CategorySelectionResult>(
+      AppRoute(
+        builder: (_) => SelectCategoryScreen(
+          selectedCategoryIds: _selectedCategories
+              .map((item) => item.id)
+              .toSet(),
+          multiSelect: true,
+          showAddButton: false,
+          title: 'Select Categories',
+        ),
+      ),
+    );
+    if (!mounted || result == null) {
+      return;
+    }
+    setState(() {
+      if (result.cleared) {
+        _selectedCategories = [];
+      } else if (result.categories != null) {
+        _selectedCategories = result.categories!;
+      }
+    });
+  }
+
+  Future<void> _export() async {
+    setState(() => _exporting = true);
     try {
       final result = await _exportService.exportCsv(
-        mode: mode,
         fromMonth: _fromMonth,
         toMonth: _toMonth,
+        categoryIds: _selectedCategories.map((item) => item.id).toSet(),
       );
       if (!mounted) {
         return;
@@ -73,7 +103,7 @@ class _ExportScreenState extends State<ExportScreen> {
       ).showSnackBar(SnackBar(content: Text('Export failed: $error')));
     } finally {
       if (mounted) {
-        setState(() => _exportingMode = null);
+        setState(() => _exporting = false);
       }
     }
   }
@@ -97,48 +127,46 @@ class _ExportScreenState extends State<ExportScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
               child: Column(
                 children: [
-                  _ExportTile(
-                    icon: Icons.file_download_outlined,
-                    title: 'Export all',
-                    value: 'All transactions in one CSV',
-                    loading: _exportingMode == ExportMode.all,
-                    onTap: () => _export(ExportMode.all),
-                  ),
-                  const Divider(height: 1),
-                  _MonthTile(
+                  _FilterTile(
+                    icon: Icons.calendar_month_outlined,
                     title: 'From month',
-                    value: monthLabel(_fromMonth),
+                    value: _fromMonth == null
+                        ? 'Any start'
+                        : monthLabel(_fromMonth!),
                     onTap: () => _pickMonth(isFrom: true),
+                    onClear: _fromMonth == null
+                        ? null
+                        : () => setState(() => _fromMonth = null),
                   ),
                   const Divider(height: 1),
-                  _MonthTile(
+                  _FilterTile(
+                    icon: Icons.calendar_month_outlined,
                     title: 'To month',
-                    value: monthLabel(_toMonth),
+                    value: _toMonth == null ? 'Any end' : monthLabel(_toMonth!),
                     onTap: () => _pickMonth(isFrom: false),
+                    onClear: _toMonth == null
+                        ? null
+                        : () => setState(() => _toMonth = null),
+                  ),
+                  const Divider(height: 1),
+                  _CategoryFilterTile(
+                    categories: _selectedCategories,
+                    onTap: _pickCategories,
+                    onClear: _selectedCategories.isEmpty
+                        ? null
+                        : () => setState(() => _selectedCategories = []),
                   ),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: AppButton(
-                      label: 'Export selected months',
-                      icon: Icons.date_range_outlined,
-                      isLoading: _exportingMode == ExportMode.monthRange,
-                      onPressed: () => _export(ExportMode.monthRange),
+                      label: 'Export transactions',
+                      icon: Icons.file_download_outlined,
+                      isLoading: _exporting,
+                      onPressed: _export,
                     ),
                   ),
                 ],
-              ),
-            ),
-            AppCard(
-              borderRadius: 8,
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-              child: _ExportTile(
-                icon: Icons.account_balance_wallet_outlined,
-                title: 'Export Debt/Loan',
-                value: 'Debt, loan, repayment, and collection records',
-                loading: _exportingMode == ExportMode.debtLoan,
-                onTap: () => _export(ExportMode.debtLoan),
               ),
             ),
           ],
@@ -148,26 +176,26 @@ class _ExportScreenState extends State<ExportScreen> {
   }
 }
 
-class _ExportTile extends StatelessWidget {
-  const _ExportTile({
+class _FilterTile extends StatelessWidget {
+  const _FilterTile({
     required this.icon,
     required this.title,
     required this.value,
-    required this.loading,
     required this.onTap,
+    this.onClear,
   });
 
   final IconData icon;
   final String title;
   final String value;
-  final bool loading;
   final VoidCallback onTap;
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {
     final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return InkWell(
-      onTap: loading ? null : onTap,
+      onTap: onTap,
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -200,12 +228,14 @@ class _ExportTile extends StatelessWidget {
                 ],
               ),
             ),
-            loading
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const SizedBox.shrink(),
+            if (onClear != null)
+              IconButton(
+                onPressed: onClear,
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Clear',
+              )
+            else
+              Icon(Icons.chevron_right_rounded, color: mutedColor),
           ],
         ),
       ),
@@ -213,16 +243,16 @@ class _ExportTile extends StatelessWidget {
   }
 }
 
-class _MonthTile extends StatelessWidget {
-  const _MonthTile({
-    required this.title,
-    required this.value,
+class _CategoryFilterTile extends StatelessWidget {
+  const _CategoryFilterTile({
+    required this.categories,
     required this.onTap,
+    this.onClear,
   });
 
-  final String title;
-  final String value;
+  final List<CategoryModel> categories;
   final VoidCallback onTap;
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {
@@ -239,28 +269,55 @@ class _MonthTile extends StatelessWidget {
                 context,
               ).colorScheme.primary.withValues(alpha: 0.12),
               child: Icon(
-                Icons.calendar_month_outlined,
+                Icons.category_outlined,
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Category',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _categoryValue,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: mutedColor),
+                  ),
+                ],
               ),
             ),
-            Text(
-              value,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: mutedColor),
-            ),
+            if (onClear != null)
+              IconButton(
+                onPressed: onClear,
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Clear',
+              )
+            else
+              Icon(Icons.chevron_right_rounded, color: mutedColor),
           ],
         ),
       ),
     );
+  }
+
+  String get _categoryValue {
+    if (categories.isEmpty) {
+      return 'All categories';
+    }
+    if (categories.length == 1) {
+      return categories.first.name;
+    }
+    if (categories.length == 2) {
+      return '${categories[0].name}, ${categories[1].name}';
+    }
+    return '${categories.length} categories selected';
   }
 }

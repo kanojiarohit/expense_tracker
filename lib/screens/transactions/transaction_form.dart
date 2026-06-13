@@ -318,157 +318,181 @@ class _TransactionFormState extends State<TransactionForm> {
     return SafeArea(
       child: Form(
         key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+        child: Column(
           children: [
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(
-                  value: TransactionTypes.expense,
-                  label: Text('Expense'),
-                ),
-                ButtonSegment(
-                  value: TransactionTypes.income,
-                  label: Text('Income'),
-                ),
-                ButtonSegment(
-                  value: TransactionTypes.debtLoan,
-                  label: Text('Loans/Debts'),
-                ),
-              ],
-              selected: {_transactionType},
-              onSelectionChanged: widget.forcedDebtLoanKind != null
-                  ? null
-                  : (value) {
-                      setState(() {
-                        _transactionType = value.first;
-                        _selectedParentTransactionId = null;
-                        _excludeFromReports =
-                            _transactionType == TransactionTypes.debtLoan;
-                        _selectedCategoryId = _resolveDefaultCategoryId();
-                        _selectedDebtLoanKind = _resolveKindFromCategoryId(
-                          _selectedCategoryId,
-                        );
-                        _syncCategoryText();
-                      });
-                      _load();
-                    },
-            ),
-            const SizedBox(height: 16),
-            AppTextField(
-              controller: _amountController,
-              label: 'Amount',
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-              validator: positiveAmountValidator,
-              contentPadding: _fieldPadding,
-            ),
-            const SizedBox(height: 18),
-            AppTextField(
-              controller: _categoryController,
-              label: 'Category',
-              readOnly: true,
-              onTap: _openCategoryPicker,
-              suffix: const Icon(Icons.expand_more),
-              validator: (_) =>
-                  _selectedCategoryId == null ? 'Select category' : null,
-              contentPadding: _fieldPadding,
-            ),
-            if (_isDebtLoan) ...[
-              const SizedBox(height: 18),
-              AppTextField(
-                controller: _partyController,
-                label: 'Lender / Borrower',
-                hintText: 'Rahul, Priya',
-                validator: (value) =>
-                    requiredValidator(value, 'Lender / Borrower'),
-                contentPadding: _fieldPadding,
-              ),
-              if (_isPaybackKind) ...[
-                const SizedBox(height: 18),
-                DropdownButtonFormField<int>(
-                  initialValue: _selectedParentTransactionId,
-                  decoration: InputDecoration(
-                    labelText:
-                        _selectedDebtLoanKind == DebtLoanKinds.debtCollection
-                        ? 'Which Loan?'
-                        : 'Which Debt?',
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: TransactionTypes.expense,
+                        label: Text('Expense'),
+                      ),
+                      ButtonSegment(
+                        value: TransactionTypes.income,
+                        label: Text('Income'),
+                      ),
+                      ButtonSegment(
+                        value: TransactionTypes.debtLoan,
+                        label: Text('Loans/Debts'),
+                      ),
+                    ],
+                    selected: {_transactionType},
+                    onSelectionChanged: widget.forcedDebtLoanKind != null
+                        ? null
+                        : (value) {
+                            setState(() {
+                              _transactionType = value.first;
+                              _selectedParentTransactionId = null;
+                              _excludeFromReports =
+                                  _transactionType == TransactionTypes.debtLoan;
+                              _selectedCategoryId = _resolveDefaultCategoryId();
+                              _selectedDebtLoanKind =
+                                  _resolveKindFromCategoryId(
+                                    _selectedCategoryId,
+                                  );
+                              _syncCategoryText();
+                            });
+                            _load();
+                          },
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    controller: _amountController,
+                    label: 'Amount',
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: positiveAmountValidator,
                     contentPadding: _fieldPadding,
                   ),
-                  items: _parentOptions
-                      .map(
-                        (item) => DropdownMenuItem<int>(
-                          value: item.transaction.id,
-                          child: Text(
-                            '${item.transaction.partyCsv ?? item.transaction.title} • ${formatMinorAmount(item.transaction.amountMinor, currency: widget.settings.currency, amountFormat: widget.settings.amountFormat)}',
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) => setState(() {
-                    _selectedParentTransactionId = value;
-                    final parent = _selectedParentOption?.transaction;
-                    if (parent?.partyCsv?.isNotEmpty == true) {
-                      _partyController.text = parent!.partyCsv!;
-                    }
-                  }),
-                ),
-              ],
-            ],
-            const SizedBox(height: 18),
-            AppTextField(
-              controller: _noteController,
-              label: 'Note',
-              maxLines: 3,
-              contentPadding: _fieldPadding,
-            ),
-            const SizedBox(height: 18),
-            AppTextField(
-              controller: TextEditingController(
-                text: formatDate(_selectedDate, SettingValues.dateIso),
-              ),
-              label: 'Transaction date',
-              readOnly: true,
-              onTap: _pickDate,
-              suffix: const Icon(Icons.calendar_today_outlined),
-              contentPadding: _fieldPadding,
-            ),
-            const SizedBox(height: 18),
-            DropdownButtonFormField<String>(
-              initialValue: _paymentMethod,
-              decoration: const InputDecoration(
-                labelText: 'Payment method',
-                contentPadding: _fieldPadding,
-              ),
-              items: PaymentMethods.values
-                  .map(
-                    (method) => DropdownMenuItem<String>(
-                      value: method,
-                      child: Text(method),
+                  const SizedBox(height: 18),
+                  AppTextField(
+                    controller: _categoryController,
+                    label: 'Category',
+                    readOnly: true,
+                    onTap: _openCategoryPicker,
+                    suffix: const Icon(Icons.expand_more),
+                    validator: (_) =>
+                        _selectedCategoryId == null ? 'Select category' : null,
+                    contentPadding: _fieldPadding,
+                  ),
+                  if (_isDebtLoan) ...[
+                    const SizedBox(height: 18),
+                    AppTextField(
+                      controller: _partyController,
+                      label: 'Lender / Borrower',
+                      hintText: 'Rahul, Priya',
+                      validator: (value) =>
+                          requiredValidator(value, 'Lender / Borrower'),
+                      contentPadding: _fieldPadding,
                     ),
-                  )
-                  .toList(),
-              onChanged: (value) => setState(
-                () => _paymentMethod = value ?? PaymentMethods.values.first,
+                    if (_isPaybackKind) ...[
+                      const SizedBox(height: 18),
+                      DropdownButtonFormField<int>(
+                        initialValue: _selectedParentTransactionId,
+                        decoration: InputDecoration(
+                          labelText:
+                              _selectedDebtLoanKind ==
+                                  DebtLoanKinds.debtCollection
+                              ? 'Which Loan?'
+                              : 'Which Debt?',
+                          contentPadding: _fieldPadding,
+                        ),
+                        items: _parentOptions
+                            .map(
+                              (item) => DropdownMenuItem<int>(
+                                value: item.transaction.id,
+                                child: Text(
+                                  '${item.transaction.partyCsv ?? item.transaction.title} • ${formatMinorAmount(item.transaction.amountMinor, currency: widget.settings.currency, amountFormat: widget.settings.amountFormat)}',
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) => setState(() {
+                          _selectedParentTransactionId = value;
+                          final parent = _selectedParentOption?.transaction;
+                          if (parent?.partyCsv?.isNotEmpty == true) {
+                            _partyController.text = parent!.partyCsv!;
+                          }
+                        }),
+                      ),
+                    ],
+                  ],
+                  const SizedBox(height: 18),
+                  AppTextField(
+                    controller: _noteController,
+                    label: 'Note',
+                    maxLines: 3,
+                    contentPadding: _fieldPadding,
+                  ),
+                  const SizedBox(height: 18),
+                  AppTextField(
+                    controller: TextEditingController(
+                      text: formatDate(_selectedDate, SettingValues.dateIso),
+                    ),
+                    label: 'Transaction date',
+                    readOnly: true,
+                    onTap: _pickDate,
+                    suffix: const Icon(Icons.calendar_today_outlined),
+                    contentPadding: _fieldPadding,
+                  ),
+                  const SizedBox(height: 18),
+                  DropdownButtonFormField<String>(
+                    initialValue: _paymentMethod,
+                    decoration: const InputDecoration(
+                      labelText: 'Payment method',
+                      contentPadding: _fieldPadding,
+                    ),
+                    items: PaymentMethods.values
+                        .map(
+                          (method) => DropdownMenuItem<String>(
+                            value: method,
+                            child: Text(method),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) => setState(
+                      () =>
+                          _paymentMethod = value ?? PaymentMethods.values.first,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Exclude from reports'),
+                    subtitle: const Text(
+                      'Transaction still appears in history and balance',
+                    ),
+                    value: _excludeFromReports,
+                    onChanged: (value) =>
+                        setState(() => _excludeFromReports = value),
+                  ),
+                  const SizedBox(height: 16),
+                ],
               ),
             ),
-            const SizedBox(height: 18),
-            SwitchListTile.adaptive(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Exclude from reports'),
-              subtitle: const Text(
-                'Transaction still appears in history and balance',
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(color: Theme.of(context).dividerColor),
+                ),
               ),
-              value: _excludeFromReports,
-              onChanged: (value) => setState(() => _excludeFromReports = value),
-            ),
-            const SizedBox(height: 24),
-            AppButton(
-              label: _isEditing ? 'Save Changes' : 'Save Transaction',
-              onPressed: _saving ? null : _save,
-              isLoading: _saving,
-              icon: Icons.check_rounded,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: AppButton(
+                    label: _isEditing ? 'Save Changes' : 'Save Transaction',
+                    onPressed: _saving ? null : _save,
+                    isLoading: _saving,
+                    icon: Icons.check_rounded,
+                  ),
+                ),
+              ),
             ),
           ],
         ),

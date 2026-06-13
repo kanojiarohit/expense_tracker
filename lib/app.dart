@@ -13,6 +13,7 @@ import 'screens/categories/add_edit_category_screen.dart';
 import 'screens/categories/categories_screen.dart';
 import 'screens/debt_loan/debt_loan_screen.dart';
 import 'screens/home/home_screen.dart';
+import 'screens/lock/app_lock_screen.dart';
 import 'screens/settings/export_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/splash/splash_screen.dart';
@@ -78,8 +79,77 @@ class _ExpenseTrackerBootstrapState extends State<ExpenseTrackerBootstrap> {
       darkTheme: AppTheme.dark(),
       themeMode: settings.themeModeValue,
       home: _ready
-          ? AppShell(settings: settings, onSettingsChanged: _reloadSettings)
+          ? AppLockGate(
+              settings: settings,
+              child: AppShell(
+                settings: settings,
+                onSettingsChanged: _reloadSettings,
+              ),
+            )
           : const SplashScreen(),
+    );
+  }
+}
+
+class AppLockGate extends StatefulWidget {
+  const AppLockGate({super.key, required this.settings, required this.child});
+
+  final AppSettingsModel settings;
+  final Widget child;
+
+  @override
+  State<AppLockGate> createState() => _AppLockGateState();
+}
+
+class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
+  late bool _unlocked;
+  bool _skipNextResumeLock = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _unlocked = !widget.settings.appLockEnabled;
+  }
+
+  @override
+  void didUpdateWidget(covariant AppLockGate oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.settings.appLockEnabled) {
+      _unlocked = true;
+      return;
+    }
+    if (!oldWidget.settings.appLockEnabled && widget.settings.appLockEnabled) {
+      _unlocked = true;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && widget.settings.appLockEnabled) {
+      if (_skipNextResumeLock) {
+        _skipNextResumeLock = false;
+        return;
+      }
+      setState(() => _unlocked = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.settings.appLockEnabled || _unlocked) {
+      return widget.child;
+    }
+    return AppLockScreen(
+      settings: widget.settings,
+      onSystemUnlockStarted: () => _skipNextResumeLock = true,
+      onUnlocked: () => setState(() => _unlocked = true),
     );
   }
 }
@@ -270,12 +340,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _openDebtLoanScreen() async {
+  Future<void> _openDebtLoanScreen({int? focusedTransactionId}) async {
     final changed = await Navigator.of(context).push<bool>(
       AppRoute(
         builder: (_) => DebtLoanScreen(
           reloadToken: _reloadToken,
           settings: widget.settings,
+          focusedTransactionId: focusedTransactionId,
           onEditTransaction: (transaction) =>
               _openTransactionForm(transaction: transaction),
           onAddPayback: (kind, parentTransaction) => _openTransactionForm(
@@ -322,7 +393,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               _reloadToken++;
             });
           },
-          onOpenDebtLoan: _openDebtLoanScreen,
+          onOpenDebtLoan: () => _openDebtLoanScreen(),
+          onOpenDebtLoanTransaction: (transactionId) =>
+              _openDebtLoanScreen(focusedTransactionId: transactionId),
           onOpenSpendings: _openSpendingsScreen,
           onOpenProvisionalTransactions: _openProvisionalTransactionsScreen,
           onEditTransaction: (transaction) =>
@@ -346,7 +419,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       case 3:
         return SettingsScreen(
           settings: widget.settings,
-          onOpenDebtLoan: _openDebtLoanScreen,
+          onOpenDebtLoan: () => _openDebtLoanScreen(),
           onOpenExport: _openExportScreen,
           onOpenProvisionalTransactions: _openProvisionalTransactionsScreen,
           onSettingsChanged: () async {

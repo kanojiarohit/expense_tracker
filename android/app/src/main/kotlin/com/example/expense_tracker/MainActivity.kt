@@ -1,6 +1,7 @@
 package com.example.expense_tracker
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -17,8 +18,10 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val smsPermissionRequestCode = 901
     private val notificationPermissionRequestCode = 902
+    private val appLockRequestCode = 903
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingNotificationPermissionResult: MethodChannel.Result? = null
+    private var pendingAppLockResult: MethodChannel.Result? = null
 
     companion object {
         private const val notificationChannelId = "provisional_transactions"
@@ -83,6 +86,17 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "expense_tracker/app_lock",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isDeviceLockSupported" -> result.success(isDeviceLockSupported())
+                "authenticateDeviceLock" -> authenticateDeviceLock(result)
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun hasSmsPermission(): Boolean {
@@ -131,6 +145,33 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun isDeviceLockSupported(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return false
+        }
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        return keyguardManager.isDeviceSecure
+    }
+
+    private fun authenticateDeviceLock(result: MethodChannel.Result) {
+        if (!isDeviceLockSupported()) {
+            result.success(false)
+            return
+        }
+        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        val intent = keyguardManager.createConfirmDeviceCredentialIntent(
+            "Unlock Expense Tracker",
+            "Confirm your device PIN, pattern, or password",
+        )
+        if (intent == null) {
+            result.success(false)
+            return
+        }
+        pendingAppLockResult?.success(false)
+        pendingAppLockResult = result
+        startActivityForResult(intent, appLockRequestCode)
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -152,6 +193,14 @@ class MainActivity : FlutterActivity() {
                 )
                 pendingNotificationPermissionResult = null
             }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == appLockRequestCode) {
+            pendingAppLockResult?.success(resultCode == RESULT_OK)
+            pendingAppLockResult = null
         }
     }
 

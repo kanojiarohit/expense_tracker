@@ -37,6 +37,7 @@ class _SpendingsScreenState extends State<SpendingsScreen>
   List<DateTime> _months = [];
   List<CategoryModel> _categories = [];
   final Map<String, List<TransactionRecord>> _recordsByMonth = {};
+  final Map<String, List<CategorySpendingGroup>> _groupsByMonthAndType = {};
   final Set<String> _loadingMonths = {};
 
   @override
@@ -86,6 +87,8 @@ class _SpendingsScreenState extends State<SpendingsScreen>
 
   String _monthKey(DateTime month) => '${month.year}-${month.month}';
 
+  String _groupKey(DateTime month) => '${_monthKey(month)}-$_selectedType';
+
   Future<void> _loadMonth(DateTime month) async {
     final key = _monthKey(month);
     if (_loadingMonths.contains(key)) {
@@ -98,6 +101,9 @@ class _SpendingsScreenState extends State<SpendingsScreen>
     }
     setState(() {
       _recordsByMonth[key] = records;
+      _groupsByMonthAndType.removeWhere((groupKey, _) {
+        return groupKey.startsWith('$key-');
+      });
       _loadingMonths.remove(key);
     });
   }
@@ -109,20 +115,32 @@ class _SpendingsScreenState extends State<SpendingsScreen>
     }
     setState(() {
       _categories = categories;
+      _groupsByMonthAndType.clear();
     });
   }
 
-  List<TransactionRecord> _filteredRecords(DateTime month) {
+  List<CategorySpendingGroup> _groupsForMonth(DateTime month) {
+    final groupKey = _groupKey(month);
+    final cached = _groupsByMonthAndType[groupKey];
+    if (cached != null) {
+      return cached;
+    }
     final records =
         _recordsByMonth[_monthKey(month)] ?? const <TransactionRecord>[];
-    return records.where((record) {
+    final filtered = <TransactionRecord>[];
+    for (final record in records) {
       final transaction = record.transaction;
-      if (transaction.excludeFromReports ||
-          transaction.transactionType != _selectedType) {
-        return false;
+      if (!transaction.excludeFromReports &&
+          transaction.transactionType == _selectedType) {
+        filtered.add(record);
       }
-      return true;
-    }).toList();
+    }
+    final groups = _transactionService.groupSpendingsByCategory(
+      filtered,
+      categories: _categories,
+    );
+    _groupsByMonthAndType[groupKey] = groups;
+    return groups;
   }
 
   @override
@@ -144,7 +162,9 @@ class _SpendingsScreenState extends State<SpendingsScreen>
                 children: [
                   _TypePills(
                     selectedType: _selectedType,
-                    onChanged: (value) => setState(() => _selectedType = value),
+                    onChanged: (value) => setState(() {
+                      _selectedType = value;
+                    }),
                   ),
                   const SizedBox(height: 12),
                   TabBar(
@@ -164,10 +184,8 @@ class _SpendingsScreenState extends State<SpendingsScreen>
                 children: [
                   for (final month in _months)
                     _MonthSpendingsBody(
-                      groups: _transactionService.groupSpendingsByCategory(
-                        _filteredRecords(month),
-                        categories: _categories,
-                      ),
+                      month: month,
+                      groupsForMonth: _groupsForMonth,
                       loading:
                           _loadingMonths.contains(_monthKey(month)) &&
                           !_recordsByMonth.containsKey(_monthKey(month)),
@@ -265,12 +283,14 @@ class _TypePill extends StatelessWidget {
 
 class _MonthSpendingsBody extends StatelessWidget {
   const _MonthSpendingsBody({
-    required this.groups,
+    required this.month,
+    required this.groupsForMonth,
     required this.loading,
     required this.settings,
   });
 
-  final List<CategorySpendingGroup> groups;
+  final DateTime month;
+  final List<CategorySpendingGroup> Function(DateTime month) groupsForMonth;
   final bool loading;
   final AppSettingsModel settings;
 
@@ -279,6 +299,7 @@ class _MonthSpendingsBody extends StatelessWidget {
     if (loading) {
       return const Center(child: CircularProgressIndicator());
     }
+    final groups = groupsForMonth(month);
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       children: [
@@ -330,7 +351,6 @@ class _SpendingParentHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _amountColor(group.type);
-    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       children: [
         Row(
@@ -345,10 +365,9 @@ class _SpendingParentHeader extends StatelessWidget {
             Expanded(
               child: Text(
                 group.name,
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: mutedColor,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
               ),
             ),
             const SizedBox(width: 12),
@@ -390,6 +409,7 @@ class _SpendingChildRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _amountColor(child.type);
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -404,9 +424,10 @@ class _SpendingChildRow extends StatelessWidget {
           Expanded(
             child: Text(
               child.name,
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: mutedColor,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           const SizedBox(width: 12),

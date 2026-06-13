@@ -17,27 +17,17 @@ class DashboardMonthReport {
 class CategorySpendData {
   CategorySpendData({
     required this.name,
+    required this.type,
     required this.iconName,
     required this.colorHex,
     required this.amountMinor,
   });
 
   final String name;
+  final String type;
   final String iconName;
   final String colorHex;
   final int amountMinor;
-}
-
-class DebtLoanTrendPoint {
-  DebtLoanTrendPoint({
-    required this.month,
-    required this.debtMinor,
-    required this.loanMinor,
-  });
-
-  final DateTime month;
-  final int debtMinor;
-  final int loanMinor;
 }
 
 class DashboardData {
@@ -46,14 +36,14 @@ class DashboardData {
     required this.monthCategorySpend,
     required this.weekCategorySpend,
     required this.recentTransactions,
-    required this.debtLoanTrend,
+    required this.recentDebtLoanTransactions,
   });
 
   final List<DashboardMonthReport> monthReports;
   final List<CategorySpendData> monthCategorySpend;
   final List<CategorySpendData> weekCategorySpend;
   final List<TransactionRecord> recentTransactions;
-  final List<DebtLoanTrendPoint> debtLoanTrend;
+  final List<TransactionRecord> recentDebtLoanTransactions;
 }
 
 class DashboardService {
@@ -87,20 +77,14 @@ class DashboardService {
           )
           .toList(),
     );
-    final debtLoanTrend = recentMonths(5).reversed.map((month) {
-      return DebtLoanTrendPoint(
-        month: month,
-        debtMinor: _principalTotal(records, month, DebtLoanKinds.debt),
-        loanMinor: _principalTotal(records, month, DebtLoanKinds.loan),
-      );
-    }).toList();
+    final recentDebtLoanTransactions = await _recentOpenDebtLoanTransactions();
 
     return DashboardData(
       monthReports: monthReports,
       monthCategorySpend: monthCategorySpend,
       weekCategorySpend: weekCategorySpend,
       recentTransactions: recent,
-      debtLoanTrend: debtLoanTrend,
+      recentDebtLoanTransactions: recentDebtLoanTransactions,
     );
   }
 
@@ -120,15 +104,23 @@ class DashboardService {
         .fold<int>(0, (sum, item) => sum + item.transaction.amountMinor);
   }
 
-  int _principalTotal(
-    List<TransactionRecord> records,
-    DateTime month,
-    String kind,
-  ) {
-    return records
-        .where((item) => isSameMonth(item.transaction.transactionDate, month))
-        .where((item) => item.transaction.debtLoanKind == kind)
-        .fold<int>(0, (sum, item) => sum + item.transaction.amountMinor);
+  Future<List<TransactionRecord>> _recentOpenDebtLoanTransactions() async {
+    final debtSummaries = await _transactionService.fetchDebtLoanSummaries(
+      DebtLoanKinds.debt,
+    );
+    final loanSummaries = await _transactionService.fetchDebtLoanSummaries(
+      DebtLoanKinds.loan,
+    );
+    final records =
+        [
+          for (final summary in [...debtSummaries, ...loanSummaries])
+            if (!summary.isClosed) summary.principal,
+        ]..sort(
+          (a, b) => b.transaction.transactionDate.compareTo(
+            a.transaction.transactionDate,
+          ),
+        );
+    return records.take(5).toList();
   }
 
   List<CategorySpendData> _topCategories(List<TransactionRecord> records) {
@@ -138,10 +130,17 @@ class DashboardService {
           item.transaction.excludeFromReports) {
         continue;
       }
+      final categoryType =
+          item.category?.type ?? item.transaction.transactionType;
+      if (categoryType != CategoryTypes.expense &&
+          categoryType != CategoryTypes.income) {
+        continue;
+      }
       final key = item.category?.name ?? 'Other';
       final current = map[key];
       map[key] = CategorySpendData(
         name: key,
+        type: categoryType,
         iconName: item.category?.icon ?? 'category',
         colorHex: item.category?.colorHex ?? '#64748B',
         amountMinor: (current?.amountMinor ?? 0) + item.transaction.amountMinor,

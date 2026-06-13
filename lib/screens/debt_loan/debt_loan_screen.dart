@@ -16,12 +16,14 @@ class DebtLoanScreen extends StatefulWidget {
     super.key,
     required this.reloadToken,
     required this.settings,
+    this.focusedTransactionId,
     this.onEditTransaction,
     this.onAddPayback,
   });
 
   final int reloadToken;
   final AppSettingsModel settings;
+  final int? focusedTransactionId;
   final ValueChanged<TransactionModel>? onEditTransaction;
   final void Function(String kind, TransactionModel parentTransaction)?
   onAddPayback;
@@ -41,10 +43,13 @@ class _DebtLoanScreenState extends State<DebtLoanScreen>
   late final TabController _tabController;
   final Map<String, List<DebtLoanSummary>> _summariesByKind = {};
   final Set<String> _loadingKinds = {};
+  final Map<int, GlobalKey> _cardKeys = {};
+  int? _pendingFocusedTransactionId;
 
   @override
   void initState() {
     super.initState();
+    _pendingFocusedTransactionId = widget.focusedTransactionId;
     _tabController = TabController(length: _tabs.length, vsync: this)
       ..addListener(() {
         setState(() {});
@@ -56,6 +61,10 @@ class _DebtLoanScreenState extends State<DebtLoanScreen>
   @override
   void didUpdateWidget(covariant DebtLoanScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusedTransactionId != widget.focusedTransactionId) {
+      _pendingFocusedTransactionId = widget.focusedTransactionId;
+      _focusPendingTransaction();
+    }
     if (oldWidget.reloadToken != widget.reloadToken) {
       _loadAll();
     }
@@ -69,6 +78,7 @@ class _DebtLoanScreenState extends State<DebtLoanScreen>
 
   Future<void> _loadAll() async {
     await Future.wait([for (final tab in _tabs) _loadKind(tab.kind)]);
+    _focusPendingTransaction();
   }
 
   Future<void> _loadKind(String kind) async {
@@ -83,6 +93,54 @@ class _DebtLoanScreenState extends State<DebtLoanScreen>
     setState(() {
       _summariesByKind[kind] = summaries;
       _loadingKinds.remove(kind);
+    });
+    _focusPendingTransaction();
+  }
+
+  void _focusPendingTransaction() {
+    final transactionId = _pendingFocusedTransactionId;
+    if (transactionId == null) {
+      return;
+    }
+    String? targetKind;
+    for (final tab in _tabs) {
+      final summaries = _summariesByKind[tab.kind];
+      if (summaries == null) {
+        continue;
+      }
+      final hasTransaction = summaries.any(
+        (summary) => summary.principal.transaction.id == transactionId,
+      );
+      if (hasTransaction) {
+        targetKind = tab.kind;
+        break;
+      }
+    }
+    if (targetKind == null) {
+      return;
+    }
+    final targetIndex = _tabs.indexWhere((tab) => tab.kind == targetKind);
+    if (targetIndex >= 0 && _tabController.index != targetIndex) {
+      _tabController.animateTo(targetIndex);
+    }
+    _pendingFocusedTransactionId = null;
+    _scheduleCardScroll(transactionId);
+  }
+
+  void _scheduleCardScroll(int transactionId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final context = _cardKeys[transactionId]?.currentContext;
+        if (context == null) {
+          return;
+        }
+        Scrollable.ensureVisible(
+          context,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+          alignment: 0.08,
+        );
+      });
     });
   }
 
@@ -135,6 +193,7 @@ class _DebtLoanScreenState extends State<DebtLoanScreen>
                     !_summariesByKind.containsKey(tab.kind),
                 summaries: _summariesByKind[tab.kind] ?? const [],
                 settings: widget.settings,
+                cardKeys: _cardKeys,
                 onOpenTransaction: _openTransaction,
               ),
           ],
@@ -150,6 +209,7 @@ class _DebtLoanTabBody extends StatelessWidget {
     required this.loading,
     required this.summaries,
     required this.settings,
+    required this.cardKeys,
     required this.onOpenTransaction,
   });
 
@@ -157,6 +217,7 @@ class _DebtLoanTabBody extends StatelessWidget {
   final bool loading;
   final List<DebtLoanSummary> summaries;
   final AppSettingsModel settings;
+  final Map<int, GlobalKey> cardKeys;
   final Future<void> Function(
     TransactionModel? transaction, {
     String? forcedKind,
@@ -187,6 +248,10 @@ class _DebtLoanTabBody extends StatelessWidget {
         else
           for (final summary in summaries)
             _DebtLoanCard(
+              key: cardKeys.putIfAbsent(
+                summary.principal.transaction.id,
+                GlobalKey.new,
+              ),
               summary: summary,
               kind: kind,
               settings: settings,
@@ -199,6 +264,7 @@ class _DebtLoanTabBody extends StatelessWidget {
 
 class _DebtLoanCard extends StatelessWidget {
   const _DebtLoanCard({
+    super.key,
     required this.summary,
     required this.kind,
     required this.settings,

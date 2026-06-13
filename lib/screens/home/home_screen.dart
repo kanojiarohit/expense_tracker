@@ -1,7 +1,5 @@
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/constants.dart';
 import '../../core/formatters.dart';
 import '../../models/app_settings.dart';
 import '../../models/transaction.dart';
@@ -20,6 +18,7 @@ class HomeScreen extends StatefulWidget {
     required this.settings,
     required this.onOpenMonth,
     required this.onOpenDebtLoan,
+    required this.onOpenDebtLoanTransaction,
     required this.onOpenSpendings,
     required this.onOpenProvisionalTransactions,
     required this.onEditTransaction,
@@ -30,6 +29,7 @@ class HomeScreen extends StatefulWidget {
   final AppSettingsModel settings;
   final ValueChanged<DateTime> onOpenMonth;
   final VoidCallback onOpenDebtLoan;
+  final ValueChanged<int> onOpenDebtLoanTransaction;
   final VoidCallback onOpenSpendings;
   final VoidCallback onOpenProvisionalTransactions;
   final ValueChanged<TransactionModel> onEditTransaction;
@@ -93,7 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         title: 'Expense Tracker',
                         subtitle:
                             'Track spending, income, and balances with clarity',
-                        actionIcon: Icons.mark_email_unread_outlined,
+                        actionIcon: Icons.receipt_long_outlined,
                         actionBadge: widget.provisionalCount,
                         onActionTap: widget.onOpenProvisionalTransactions,
                       ),
@@ -132,6 +132,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               data: data,
                               settings: widget.settings,
                               onOpenDebtLoan: widget.onOpenDebtLoan,
+                              onOpenDebtLoanTransaction:
+                                  widget.onOpenDebtLoanTransaction,
                             ),
                           ),
                         ],
@@ -308,9 +310,11 @@ class _SpendingCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           if (spendData.isEmpty) ...[
-            const EmptyState(
-              title: 'No spending yet',
-              description: 'Your top categories will appear here.',
+            const Center(
+              child: EmptyState(
+                title: 'No spending yet',
+                description: 'Your top categories will appear here.',
+              ),
             ),
           ],
           if (spendData.isNotEmpty) ...[
@@ -335,11 +339,7 @@ class _CategorySpendRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         children: [
-          CategoryAvatar(
-            name: item.name,
-            type: CategoryTypes.expense,
-            radius: 18,
-          ),
+          CategoryAvatar(name: item.name, type: item.type, radius: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -412,9 +412,9 @@ class _RecentTransactionsCard extends StatelessWidget {
                   ),
                 ),
                 subtitle: Text(
-                  record.transaction.partyCsv?.isNotEmpty == true
-                      ? record.transaction.partyCsv!
-                      : record.transaction.note,
+                  _homeTransactionSubtitle(record),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 trailing: Text(
                   '${signedAmount(record.transaction) >= 0 ? '+' : '-'}${formatMinorAmount(signedAmount(record.transaction).abs(), currency: settings.currency, amountFormat: settings.amountFormat)}',
@@ -437,25 +437,16 @@ class _DebtLoanCard extends StatelessWidget {
     required this.data,
     required this.settings,
     required this.onOpenDebtLoan,
+    required this.onOpenDebtLoanTransaction,
   });
 
   final DashboardData data;
   final AppSettingsModel settings;
   final VoidCallback onOpenDebtLoan;
+  final ValueChanged<int> onOpenDebtLoanTransaction;
 
   @override
   Widget build(BuildContext context) {
-    final spotsDebt = <FlSpot>[];
-    final spotsLoan = <FlSpot>[];
-    for (var i = 0; i < data.debtLoanTrend.length; i++) {
-      spotsDebt.add(
-        FlSpot(i.toDouble(), data.debtLoanTrend[i].debtMinor.toDouble() / 100),
-      );
-      spotsLoan.add(
-        FlSpot(i.toDouble(), data.debtLoanTrend[i].loanMinor.toDouble() / 100),
-      );
-    }
-
     return AppCard(
       borderRadius: 8,
       child: Column(
@@ -463,131 +454,78 @@ class _DebtLoanCard extends StatelessWidget {
         children: [
           SectionHeader(
             title: 'Debt/Loan',
-            subtitle: 'Last 5 months',
+            subtitle: 'Latest 5 open debt and loan records',
             actionLabel: 'Show All',
             onActionTap: onOpenDebtLoan,
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            height: 220,
-            child: RepaintBoundary(
-              child: LineChart(
-                LineChartData(
-                  minY: 0,
-                  maxY:
-                      data.debtLoanTrend.every(
-                        (item) => item.debtMinor == 0 && item.loanMinor == 0,
-                      )
-                      ? 1
-                      : null,
-                  gridData: const FlGridData(show: false),
-                  borderData: FlBorderData(show: false),
-                  titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    rightTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    leftTitles: const AxisTitles(
-                      sideTitles: SideTitles(showTitles: false),
-                    ),
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          final index = value.toInt();
-                          if (index < 0 || index >= data.debtLoanTrend.length) {
-                            return const SizedBox.shrink();
-                          }
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              monthLabel(
-                                data.debtLoanTrend[index].month,
-                              ).split(' ').first,
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  lineTouchData: LineTouchData(
-                    touchTooltipData: LineTouchTooltipData(
-                      fitInsideHorizontally: true,
-                      fitInsideVertically: true,
-                      getTooltipItems: (spots) {
-                        return spots.map((spot) {
-                          final label = spot.barIndex == 0 ? 'Debt' : 'Loan';
-                          return LineTooltipItem(
-                            '$label ${formatMinorAmount((spot.y * 100).round(), currency: settings.currency, amountFormat: settings.amountFormat)}',
-                            TextStyle(
-                              color: spot.barIndex == 0
-                                  ? AppColors.success
-                                  : AppColors.accent,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                          );
-                        }).toList();
-                      },
-                    ),
-                  ),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: spotsDebt,
-                      isCurved: false,
-                      color: AppColors.success,
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                    ),
-                    LineChartBarData(
-                      spots: spotsLoan,
-                      isCurved: false,
-                      color: AppColors.accent,
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                    ),
-                  ],
-                ),
-                duration: Duration.zero,
+          if (data.recentDebtLoanTransactions.isEmpty)
+            const EmptyState(
+              title: 'No debt or loan yet',
+              description: 'Debt and loan transactions will appear here.',
+            )
+          else
+            for (final record in data.recentDebtLoanTransactions)
+              _DebtLoanTransactionRow(
+                record: record,
+                settings: settings,
+                onTap: () => onOpenDebtLoanTransaction(record.transaction.id),
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 16,
-            children: const [
-              _LegendDot(label: 'Debt taken', color: AppColors.success),
-              _LegendDot(label: 'Loan given', color: AppColors.accent),
-            ],
-          ),
         ],
       ),
     );
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.label, required this.color});
+class _DebtLoanTransactionRow extends StatelessWidget {
+  const _DebtLoanTransactionRow({
+    required this.record,
+    required this.settings,
+    required this.onTap,
+  });
 
-  final String label;
-  final Color color;
+  final TransactionRecord record;
+  final AppSettingsModel settings;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    final signed = signedAmount(record.transaction);
+    final color = signed >= 0 ? AppColors.success : AppColors.accent;
+    return ListTile(
+      onTap: onTap,
+      contentPadding: EdgeInsets.zero,
+      leading: CategoryAvatar(
+        category: record.category,
+        type: record.transaction.transactionType,
+        debtLoanKind: record.transaction.debtLoanKind,
+      ),
+      title: Text(
+        transactionDisplayTitle(
+          record.transaction,
+          categoryName: record.category?.name,
+          subCategoryName: record.subCategory?.name,
         ),
-        const SizedBox(width: 8),
-        Text(label),
-      ],
+      ),
+      subtitle: Text(
+        _homeTransactionSubtitle(record),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Text(
+        '${signed >= 0 ? '+' : '-'}${formatMinorAmount(signed.abs(), currency: settings.currency, amountFormat: settings.amountFormat)}',
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
+}
+
+String _homeTransactionSubtitle(TransactionRecord record) {
+  if (record.transaction.note.isNotEmpty) {
+    return record.transaction.note;
+  }
+  return record.transaction.partyCsv ?? '';
 }

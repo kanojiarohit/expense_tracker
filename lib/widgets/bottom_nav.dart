@@ -18,7 +18,7 @@ class BottomNav extends StatelessWidget {
       _NavItemData(icon: Icons.home_rounded, label: 'Home'),
       _NavItemData(icon: Icons.receipt_long_rounded, label: 'Transactions'),
       _NavItemData(icon: Icons.folder_open_rounded, label: 'Categories'),
-      _NavItemData(icon: Icons.settings_rounded, label: 'Settings & Tools'),
+      _NavItemData(icon: Icons.settings_rounded, label: 'Tools & Settings'),
     ];
     final theme = Theme.of(context);
     return Material(

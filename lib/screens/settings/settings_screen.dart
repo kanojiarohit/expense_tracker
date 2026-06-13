@@ -6,6 +6,7 @@ import '../../core/currencies.dart';
 import '../../core/formatters.dart';
 import '../../models/app_settings.dart';
 import '../../navigation/app_route.dart';
+import '../../services/app_lock_service.dart';
 import '../../services/export_service.dart';
 import '../../services/provisional_notification_service.dart';
 import '../../services/settings_service.dart';
@@ -35,6 +36,7 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final AppLockService _appLockService = AppLockService();
   final SettingsService _settingsService = SettingsService();
   final SmsTransactionService _smsTransactionService = SmsTransactionService();
   final ProvisionalNotificationService _notificationService =
@@ -46,13 +48,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late String _currency;
   late String _exportPath;
   late bool _smsImportEnabled;
+  late bool _appLockEnabled;
   String _defaultExportPath = '';
+  bool _deviceLockAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _syncFromWidget();
     _loadDefaultExportPath();
+    _loadDeviceLockAvailability();
   }
 
   @override
@@ -70,6 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _currency = widget.settings.currency;
     _exportPath = widget.settings.exportPath ?? '';
     _smsImportEnabled = widget.settings.smsImportEnabled;
+    _appLockEnabled = widget.settings.appLockEnabled;
   }
 
   Future<void> _loadDefaultExportPath() async {
@@ -78,6 +84,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     setState(() => _defaultExportPath = path);
+  }
+
+  Future<void> _loadDeviceLockAvailability() async {
+    final available = await _appLockService.canUseDeviceLock();
+    if (!mounted) {
+      return;
+    }
+    setState(() => _deviceLockAvailable = available);
   }
 
   Future<void> _save() async {
@@ -91,6 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ..currency = _currency
         ..exportPath = _exportPath.trim().isEmpty ? null : _exportPath.trim()
         ..smsImportEnabled = _smsImportEnabled
+        ..appLockEnabled = _appLockEnabled
         ..createdAt = widget.settings.createdAt;
       await _settingsService.save(settings);
       await widget.onSettingsChanged();
@@ -199,7 +214,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final shouldEnable = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Enable SMS Import'),
+        title: const Text('Enable Transactions from SMS'),
         content: const Text(
           'Expense Tracker will detect new bank transaction SMS and keep them as provisional transactions for review. Nothing is added to reports until you save it.',
         ),
@@ -227,7 +242,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (!granted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('SMS import permission was not granted.')),
+        const SnackBar(
+          content: Text('Transactions from SMS permission was not granted.'),
+        ),
       );
       return;
     }
@@ -250,12 +267,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _save();
   }
 
+  Future<void> _toggleAppLock(bool enabled) async {
+    if (!enabled) {
+      setState(() => _appLockEnabled = false);
+      await _save();
+      return;
+    }
+    final available = await _appLockService.canUseDeviceLock();
+    if (!mounted) {
+      return;
+    }
+    if (!available) {
+      setState(() => _deviceLockAvailable = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Set an Android screen PIN, pattern, or password first.',
+          ),
+        ),
+      );
+      return;
+    }
+    final authenticated = await _appLockService.authenticateDeviceLock();
+    if (!mounted || !authenticated) {
+      return;
+    }
+    setState(() {
+      _appLockEnabled = true;
+      _deviceLockAvailable = true;
+    });
+    await _save();
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const SectionHeader(
+            title: 'Tools',
+            subtitle: 'Export data and manage balances',
+          ),
+          const SizedBox(height: 12),
+          AppCard(
+            borderRadius: 8,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+            child: Column(
+              children: [
+                _SettingTile(
+                  icon: Icons.file_download_outlined,
+                  title: 'Export',
+                  value: 'Save transactions as CSV',
+                  saving: false,
+                  onTap: widget.onOpenExport,
+                ),
+                const Divider(height: 1),
+                _SettingTile(
+                  icon: Icons.account_balance_wallet_outlined,
+                  title: 'Debt/Loan',
+                  value: 'Open debt and loan records',
+                  saving: false,
+                  onTap: widget.onOpenDebtLoan,
+                ),
+                const Divider(height: 1),
+                _SettingTile(
+                  icon: Icons.receipt_long_outlined,
+                  title: 'Provisional Transactions',
+                  value: 'Review bank SMS transactions',
+                  saving: false,
+                  onTap: widget.onOpenProvisionalTransactions,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
           const SectionHeader(
             title: 'Settings',
             subtitle: 'Formats and appearance',
@@ -327,8 +413,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const Divider(height: 1),
                 _SwitchSettingTile(
-                  icon: Icons.mark_email_unread_outlined,
-                  title: 'SMS import',
+                  icon: Icons.sms_outlined,
+                  title: 'Transactions from SMS',
                   value: _smsImportEnabled,
                   description: _smsImportEnabled
                       ? 'Bank SMS saved for review'
@@ -336,42 +422,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   saving: _saving,
                   onChanged: _toggleSmsImport,
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          const SectionHeader(
-            title: 'Tools',
-            subtitle: 'Export data and manage balances',
-          ),
-          const SizedBox(height: 12),
-          AppCard(
-            borderRadius: 8,
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-            child: Column(
-              children: [
-                _SettingTile(
-                  icon: Icons.file_download_outlined,
-                  title: 'Export',
-                  value: 'Save transactions as CSV',
-                  saving: false,
-                  onTap: widget.onOpenExport,
-                ),
                 const Divider(height: 1),
-                _SettingTile(
-                  icon: Icons.account_balance_wallet_outlined,
-                  title: 'Debt/Loan',
-                  value: 'Open debt and loan records',
-                  saving: false,
-                  onTap: widget.onOpenDebtLoan,
-                ),
-                const Divider(height: 1),
-                _SettingTile(
-                  icon: Icons.mark_email_unread_outlined,
-                  title: 'Provisional Transactions',
-                  value: 'Review bank SMS transactions',
-                  saving: false,
-                  onTap: widget.onOpenProvisionalTransactions,
+                _SwitchSettingTile(
+                  icon: Icons.lock_outline_rounded,
+                  title: 'App lock',
+                  value: _appLockEnabled,
+                  description: _appLockEnabled
+                      ? 'Android screen lock required'
+                      : (_deviceLockAvailable
+                            ? 'Off'
+                            : 'Set screen lock first'),
+                  saving: _saving,
+                  onChanged: _toggleAppLock,
                 ),
               ],
             ),

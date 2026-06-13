@@ -14,6 +14,7 @@ class AppSettingsModel {
   late String dateFormat;
   String? exportPath;
   late bool smsImportEnabled;
+  late bool appLockEnabled;
   late DateTime createdAt;
 
   static AppSettingsModel defaults() {
@@ -24,6 +25,7 @@ class AppSettingsModel {
       ..dateFormat = SettingValues.dateDdMmYyyy
       ..exportPath = null
       ..smsImportEnabled = false
+      ..appLockEnabled = false
       ..createdAt = DateTime.now();
   }
 }

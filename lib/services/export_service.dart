@@ -8,8 +8,6 @@ import '../core/formatters.dart';
 import 'settings_service.dart';
 import 'transaction_service.dart';
 
-enum ExportMode { all, monthRange, debtLoan }
-
 class ExportResult {
   const ExportResult({required this.filePath, required this.recordCount});
 
@@ -27,18 +25,15 @@ class ExportService {
   }
 
   Future<ExportResult> exportCsv({
-    required ExportMode mode,
     DateTime? fromMonth,
     DateTime? toMonth,
+    Set<int> categoryIds = const {},
   }) async {
-    final records = switch (mode) {
-      ExportMode.all => await _transactionService.fetchAllRecords(),
-      ExportMode.monthRange => await _transactionService.fetchRecordsBetween(
-        fromMonth!,
-        toMonth!,
-      ),
-      ExportMode.debtLoan => await _transactionService.fetchDebtLoanRecords(),
-    };
+    final records = await _filteredRecords(
+      fromMonth: fromMonth,
+      toMonth: toMonth,
+      categoryIds: categoryIds,
+    );
 
     final settings = await _settingsService.load();
     final savedPath = settings.exportPath?.trim() ?? '';
@@ -50,10 +45,42 @@ class ExportService {
       await directory.create(recursive: true);
     }
     final csv = _buildCsv(records);
-    final fileName = _fileName(mode, fromMonth: fromMonth, toMonth: toMonth);
+    final fileName = _fileName(
+      fromMonth: fromMonth,
+      toMonth: toMonth,
+      categoryCount: categoryIds.length,
+    );
     final file = File('${directory.path}/$fileName');
     await file.writeAsString(csv);
     return ExportResult(filePath: file.path, recordCount: records.length);
+  }
+
+  Future<List<TransactionRecord>> _filteredRecords({
+    DateTime? fromMonth,
+    DateTime? toMonth,
+    Set<int> categoryIds = const {},
+  }) async {
+    final records = await _transactionService.fetchAllRecords();
+    final fromDate = fromMonth == null ? null : startOfMonth(fromMonth);
+    final toDate = toMonth == null ? null : endOfMonth(toMonth);
+    return records.where((record) {
+      final date = record.transaction.transactionDate;
+      if (fromDate != null && date.isBefore(fromDate)) {
+        return false;
+      }
+      if (toDate != null && date.isAfter(toDate)) {
+        return false;
+      }
+      if (categoryIds.isEmpty) {
+        return true;
+      }
+      final category = record.category;
+      final subCategory = record.subCategory;
+      return categoryIds.contains(record.transaction.categoryId) ||
+          categoryIds.contains(record.transaction.subCategoryId) ||
+          categoryIds.contains(category?.parentCategoryId) ||
+          categoryIds.contains(subCategory?.parentCategoryId);
+    }).toList();
   }
 
   String _buildCsv(List<TransactionRecord> records) {
@@ -97,14 +124,23 @@ class ExportService {
     ];
   }
 
-  String _fileName(ExportMode mode, {DateTime? fromMonth, DateTime? toMonth}) {
+  String _fileName({
+    DateTime? fromMonth,
+    DateTime? toMonth,
+    required int categoryCount,
+  }) {
     final stamp = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
-    final label = switch (mode) {
-      ExportMode.all => 'all',
-      ExportMode.monthRange =>
-        '${DateFormat('yyyyMM').format(fromMonth!)}_${DateFormat('yyyyMM').format(toMonth!)}',
-      ExportMode.debtLoan => 'debt_loan',
-    };
+    final labels = <String>[];
+    if (fromMonth != null) {
+      labels.add('from_${DateFormat('yyyyMM').format(fromMonth)}');
+    }
+    if (toMonth != null) {
+      labels.add('to_${DateFormat('yyyyMM').format(toMonth)}');
+    }
+    if (categoryCount > 0) {
+      labels.add('categories_$categoryCount');
+    }
+    final label = labels.isEmpty ? 'all' : labels.join('_');
     return 'expense_tracker_${label}_$stamp.csv';
   }
 

@@ -4,6 +4,7 @@ import '../../core/constants.dart';
 import '../../models/category.dart';
 import '../../navigation/app_route.dart';
 import '../../services/category_service.dart';
+import '../../widgets/app_button.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_text_field.dart';
 import '../../widgets/category_avatar.dart';
@@ -13,8 +14,10 @@ import 'add_edit_category_screen.dart';
 class SelectCategoryScreen extends StatefulWidget {
   const SelectCategoryScreen({
     super.key,
-    required this.type,
+    this.type,
     this.selectedCategoryId,
+    this.selectedCategoryIds = const {},
+    this.multiSelect = false,
     this.parentOnly = false,
     this.includeNoParent = false,
     this.excludedCategoryId,
@@ -22,8 +25,10 @@ class SelectCategoryScreen extends StatefulWidget {
     this.title,
   });
 
-  final String type;
+  final String? type;
   final int? selectedCategoryId;
+  final Set<int> selectedCategoryIds;
+  final bool multiSelect;
   final bool parentOnly;
   final bool includeNoParent;
   final int? excludedCategoryId;
@@ -35,49 +40,99 @@ class SelectCategoryScreen extends StatefulWidget {
 }
 
 class CategorySelectionResult {
-  const CategorySelectionResult({this.category, this.cleared = false});
+  const CategorySelectionResult({
+    this.category,
+    this.categories,
+    this.cleared = false,
+  });
 
   final CategoryModel? category;
+  final List<CategoryModel>? categories;
   final bool cleared;
 }
 
-class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
+class _SelectCategoryScreenState extends State<SelectCategoryScreen>
+    with SingleTickerProviderStateMixin {
+  static const _tabs = [
+    (label: 'Expense', type: CategoryTypes.expense),
+    (label: 'Income', type: CategoryTypes.income),
+    (label: 'Debt/Loan', type: CategoryTypes.debtLoan),
+  ];
+
   final CategoryService _categoryService = CategoryService();
   final _searchController = TextEditingController();
 
+  TabController? _tabController;
   bool _loading = true;
   List<CategoryModel> _categories = [];
+  late Set<int> _selectedCategoryIds;
 
   @override
   void initState() {
     super.initState();
+    _selectedCategoryIds = {...widget.selectedCategoryIds};
+    if (widget.selectedCategoryId != null) {
+      _selectedCategoryIds.add(widget.selectedCategoryId!);
+    }
+    if (widget.type == null) {
+      _tabController = TabController(length: _tabs.length, vsync: this)
+        ..addListener(() => setState(() {}));
+    }
     _searchController.addListener(() => setState(() {}));
     _load();
   }
 
   @override
   void dispose() {
+    _tabController?.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final categories = await _categoryService.fetchByType(widget.type);
+    final type = widget.type;
+    final categories = type == null
+        ? await _categoryService.fetchAll()
+        : await _categoryService.fetchByType(type);
     if (!mounted) {
       return;
     }
+    _syncSelectedTab(categories);
     setState(() {
       _categories = categories;
       _loading = false;
     });
   }
 
+  void _syncSelectedTab(List<CategoryModel> categories) {
+    final controller = _tabController;
+    if (controller == null || _selectedCategoryIds.isEmpty) {
+      return;
+    }
+    final selectedId = widget.selectedCategoryId ?? _selectedCategoryIds.first;
+    final selected = categories
+        .where((category) => category.id == selectedId)
+        .cast<CategoryModel?>()
+        .firstWhere((_) => true, orElse: () => null);
+    if (selected == null) {
+      return;
+    }
+    final index = _tabs.indexWhere((tab) => tab.type == selected.type);
+    if (index >= 0) {
+      controller.index = index;
+    }
+  }
+
   Future<void> _addCategory() async {
+    final type = widget.type;
+    if (type == null) {
+      return;
+    }
     final saved = await Navigator.of(context).push<bool>(
       AppRoute(
         builder: (_) =>
-            AddEditCategoryScreen(initialType: widget.type, lockType: true),
+            AddEditCategoryScreen(initialType: type, lockType: true),
       ),
     );
     if (saved == true) {
@@ -85,9 +140,35 @@ class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
     }
   }
 
-  List<CategoryModel> get _visibleRoots {
+  void _finishMultiSelect() {
+    final selected = _categories
+        .where((category) => _selectedCategoryIds.contains(category.id))
+        .toList();
+    Navigator.of(context).pop(CategorySelectionResult(categories: selected));
+  }
+
+  void _toggleCategory(CategoryModel category) {
+    setState(() {
+      if (_selectedCategoryIds.contains(category.id)) {
+        _selectedCategoryIds.remove(category.id);
+      } else {
+        _selectedCategoryIds.add(category.id);
+      }
+    });
+  }
+
+  bool _isSelected(CategoryModel category) {
+    return widget.multiSelect
+        ? _selectedCategoryIds.contains(category.id)
+        : category.id == widget.selectedCategoryId;
+  }
+
+  List<CategoryModel> _visibleRootsFor(String type) {
     final query = _searchController.text.trim().toLowerCase();
     final roots = _categories.where((category) {
+      if (category.type != type) {
+        return false;
+      }
       if (category.parentCategoryId != null) {
         return false;
       }
@@ -130,7 +211,7 @@ class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
   }
 
   String _categoryTitle(CategoryModel category) {
-    if (widget.type != CategoryTypes.debtLoan ||
+    if (category.type != CategoryTypes.debtLoan ||
         category.parentCategoryId != null) {
       return category.name;
     }
@@ -154,9 +235,8 @@ class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final roots = _visibleRoots;
-    final showNoParent =
-        widget.includeNoParent && _searchController.text.trim().isEmpty;
+    final type = widget.type;
+    final tabController = _tabController;
 
     return Scaffold(
       appBar: AppBar(
@@ -166,7 +246,7 @@ class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         surfaceTintColor: Colors.transparent,
         actions: [
-          if (widget.showAddButton)
+          if (widget.showAddButton && widget.type != null)
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: IconButton.filled(
@@ -177,6 +257,31 @@ class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
             ),
         ],
       ),
+      bottomNavigationBar: widget.multiSelect
+          ? SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  border: Border(
+                    top: BorderSide(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: AppButton(
+                    label: 'Done',
+                    icon: Icons.check_rounded,
+                    onPressed: _finishMultiSelect,
+                  ),
+                ),
+              ),
+            )
+          : null,
       body: SafeArea(
         child: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -194,74 +299,95 @@ class _SelectCategoryScreenState extends State<SelectCategoryScreen> {
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: roots.isEmpty && !showNoParent
-                        ? const EmptyState(
-                            title: 'No categories found',
-                            description:
-                                'Add a new category or change your search.',
-                          )
-                        : ListView(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            children: [
-                              if (showNoParent)
-                                AppCard(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  borderRadius: 8,
-                                  child: _CategoryRow(
-                                    title: 'No parent',
-                                    icon: Icons.layers_clear_outlined,
-                                    selected: widget.selectedCategoryId == null,
-                                    onTap: () => Navigator.of(context).pop(
-                                      const CategorySelectionResult(
-                                        cleared: true,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              for (final root in roots)
-                                AppCard(
-                                  margin: const EdgeInsets.only(bottom: 12),
-                                  borderRadius: 8,
-                                  child: Column(
-                                    children: [
-                                      _CategoryRow(
-                                        category: root,
-                                        title: _categoryTitle(root),
-                                        selected:
-                                            root.id ==
-                                            widget.selectedCategoryId,
-                                        onTap: () => Navigator.of(context).pop(
-                                          CategorySelectionResult(
-                                            category: root,
-                                          ),
-                                        ),
-                                      ),
-                                      if (!widget.parentOnly)
-                                        for (final child in _childrenFor(root))
-                                          _CategoryRow(
-                                            category: child,
-                                            title: _categoryTitle(child),
-                                            selected:
-                                                child.id ==
-                                                widget.selectedCategoryId,
-                                            indent: 28,
-                                            onTap: () =>
-                                                Navigator.of(context).pop(
-                                                  CategorySelectionResult(
-                                                    category: child,
-                                                  ),
-                                                ),
-                                          ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                          ),
-                  ),
+                  if (type == null && tabController != null) ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: TabBar(
+                        controller: tabController,
+                        tabs: [for (final tab in _tabs) Tab(text: tab.label)],
+                      ),
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        controller: tabController,
+                        children: [
+                          for (final tab in _tabs) _categoryList(tab.type),
+                        ],
+                      ),
+                    ),
+                  ] else
+                    Expanded(child: _categoryList(type!)),
                 ],
               ),
       ),
+    );
+  }
+
+  Widget _categoryList(String type) {
+    final roots = _visibleRootsFor(type);
+    final showNoParent =
+        widget.type != null &&
+        widget.includeNoParent &&
+        _searchController.text.trim().isEmpty;
+
+    if (roots.isEmpty && !showNoParent) {
+      return const EmptyState(
+        title: 'No categories found',
+        description: 'Add a new category or change your search.',
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      children: [
+        if (showNoParent)
+          AppCard(
+            margin: const EdgeInsets.only(bottom: 12),
+            borderRadius: 8,
+            child: _CategoryRow(
+              title: 'No parent',
+              icon: Icons.layers_clear_outlined,
+              selected: widget.selectedCategoryId == null,
+              onTap: () => Navigator.of(
+                context,
+              ).pop(const CategorySelectionResult(cleared: true)),
+            ),
+          ),
+        for (final root in roots)
+          AppCard(
+            margin: const EdgeInsets.only(bottom: 12),
+            borderRadius: 8,
+            child: Column(
+              children: [
+                _CategoryRow(
+                  category: root,
+                  title: _categoryTitle(root),
+                  selected: _isSelected(root),
+                  showSelectionControl: widget.multiSelect,
+                  onTap: widget.multiSelect
+                      ? () => _toggleCategory(root)
+                      : () => Navigator.of(
+                          context,
+                        ).pop(CategorySelectionResult(category: root)),
+                ),
+                if (!widget.parentOnly)
+                  for (final child in _childrenFor(root))
+                    _CategoryRow(
+                      category: child,
+                      title: _categoryTitle(child),
+                      selected: _isSelected(child),
+                      showSelectionControl: widget.multiSelect,
+                      indent: 28,
+                      onTap: widget.multiSelect
+                          ? () => _toggleCategory(child)
+                          : () => Navigator.of(
+                              context,
+                            ).pop(CategorySelectionResult(category: child)),
+                    ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
@@ -273,6 +399,7 @@ class _CategoryRow extends StatelessWidget {
     required this.onTap,
     this.icon,
     this.selected = false,
+    this.showSelectionControl = false,
     this.indent = 0,
   });
 
@@ -281,6 +408,7 @@ class _CategoryRow extends StatelessWidget {
   final VoidCallback onTap;
   final IconData? icon;
   final bool selected;
+  final bool showSelectionControl;
   final double indent;
 
   @override
@@ -310,10 +438,14 @@ class _CategoryRow extends StatelessWidget {
                 ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
             ),
-            if (selected)
+            if (showSelectionControl || selected)
               Icon(
-                Icons.check_circle,
-                color: Theme.of(context).colorScheme.primary,
+                selected
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked_rounded,
+                color: selected
+                    ? Theme.of(context).colorScheme.primary
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
           ],
         ),
