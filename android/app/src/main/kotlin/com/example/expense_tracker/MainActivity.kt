@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -22,6 +23,8 @@ class MainActivity : FlutterActivity() {
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingNotificationPermissionResult: MethodChannel.Result? = null
     private var pendingAppLockResult: MethodChannel.Result? = null
+    private var secureWindowRequested = false
+    private var secureWindowAlwaysOn = false
 
     companion object {
         private const val notificationChannelId = "provisional_transactions"
@@ -94,6 +97,16 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "isDeviceLockSupported" -> result.success(isDeviceLockSupported())
                 "authenticateDeviceLock" -> authenticateDeviceLock(result)
+                "setSecureWindow" -> {
+                    secureWindowRequested = call.argument<Boolean>("enabled") ?: false
+                    applySecureWindowFlag()
+                    result.success(null)
+                }
+                "setSecureWindowAlwaysOn" -> {
+                    secureWindowAlwaysOn = call.argument<Boolean>("enabled") ?: false
+                    applySecureWindowFlag()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -170,6 +183,14 @@ class MainActivity : FlutterActivity() {
         pendingAppLockResult?.success(false)
         pendingAppLockResult = result
         startActivityForResult(intent, appLockRequestCode)
+    }
+
+    private fun applySecureWindowFlag() {
+        if (secureWindowRequested || secureWindowAlwaysOn) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
     }
 
     override fun onRequestPermissionsResult(

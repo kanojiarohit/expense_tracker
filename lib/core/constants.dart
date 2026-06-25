@@ -42,6 +42,13 @@ class SettingValues {
   static const dateMmDdYyyy = 'MM/DD/YYYY';
   static const dateIso = 'YYYY-MM-DD';
   static const dateLong = 'D MMM YYYY';
+
+  static const smsImportProvisional = 'provisional';
+  static const smsImportMainTransaction = 'mainTransaction';
+
+  static const appLockImmediate = 'immediate';
+  static const appLockAfter1Minute = 'after1Minute';
+  static const appLockAfter30Minutes = 'after30Minutes';
 }
 
 class PaymentMethods {
@@ -73,6 +80,13 @@ class SeedCategory {
 }
 
 const seededCategories = <SeedCategory>[
+  SeedCategory(
+    name: 'Debit',
+    type: CategoryTypes.expense,
+    icon: 'account_balance_wallet',
+    colorHex: '#0F766E',
+    isSystem: true,
+  ),
   SeedCategory(
     name: 'Food',
     type: CategoryTypes.expense,
@@ -135,6 +149,13 @@ const seededCategories = <SeedCategory>[
     type: CategoryTypes.expense,
     icon: 'category',
     colorHex: '#64748B',
+  ),
+  SeedCategory(
+    name: 'Credit',
+    type: CategoryTypes.income,
+    icon: 'savings',
+    colorHex: '#2563EB',
+    isSystem: true,
   ),
   SeedCategory(
     name: 'Salary',
@@ -205,6 +226,8 @@ const categoryIconChoices = <String>[
   'movie',
   'work',
   'wallet',
+  'account_balance_wallet',
+  'savings',
   'directions_bus',
   'category',
 ];

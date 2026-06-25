@@ -313,6 +313,27 @@ class TransactionService {
     });
   }
 
+  Future<bool> saveSmsTransactionIfNew(TransactionModel transaction) async {
+    final isar = await IsarService.instance.database;
+    final sameDate = await isar.transactionModels
+        .filter()
+        .transactionDateEqualTo(transaction.transactionDate)
+        .findAll();
+    final exists = sameDate.any(
+      (item) =>
+          item.amountMinor == transaction.amountMinor &&
+          item.transactionType == transaction.transactionType &&
+          item.categoryId == transaction.categoryId &&
+          item.paymentMethod == transaction.paymentMethod &&
+          item.note == transaction.note,
+    );
+    if (exists) {
+      return false;
+    }
+    await save(transaction);
+    return true;
+  }
+
   Future<void> delete(TransactionModel transaction) async {
     final isar = await IsarService.instance.database;
     final linkedCount = await isar.transactionModels

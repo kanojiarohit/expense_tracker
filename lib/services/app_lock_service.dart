@@ -22,4 +22,20 @@ class AppLockService {
       return false;
     }
   }
+
+  Future<void> setSecureWindow(bool enabled) async {
+    try {
+      await _channel.invokeMethod<void>('setSecureWindow', {
+        'enabled': enabled,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> setSecureWindowAlwaysOn(bool enabled) async {
+    try {
+      await _channel.invokeMethod<void>('setSecureWindowAlwaysOn', {
+        'enabled': enabled,
+      });
+    } catch (_) {}
+  }
 }

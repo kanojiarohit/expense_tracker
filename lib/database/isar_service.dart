@@ -48,6 +48,7 @@ class IsarService {
 
     final categoryCount = await isar.categoryModels.count();
     if (categoryCount > 0) {
+      await _backfillSystemCategories(isar);
       return;
     }
 
@@ -70,5 +71,40 @@ class IsarService {
         }
       }
     });
+  }
+
+  Future<void> _backfillSystemCategories(Isar isar) async {
+    final existing = await isar.categoryModels.where().findAll();
+    final existingKeys = existing
+        .map((item) => _categoryKey(name: item.name, type: item.type))
+        .toSet();
+    final missingSeeds = seededCategories.where(
+      (seed) =>
+          seed.isSystem &&
+          seed.parentName == null &&
+          !existingKeys.contains(
+            _categoryKey(name: seed.name, type: seed.type),
+          ),
+    );
+    if (missingSeeds.isEmpty) {
+      return;
+    }
+    await isar.writeTxn(() async {
+      for (final seed in missingSeeds) {
+        final category = CategoryModel()
+          ..name = seed.name
+          ..type = seed.type
+          ..parentCategoryId = null
+          ..icon = seed.icon
+          ..colorHex = seed.colorHex
+          ..isSystem = seed.isSystem
+          ..createdAt = DateTime.now();
+        await isar.categoryModels.put(category);
+      }
+    });
+  }
+
+  String _categoryKey({required String name, required String type}) {
+    return '${type.trim().toLowerCase()}|${name.trim().toLowerCase()}';
   }
 }

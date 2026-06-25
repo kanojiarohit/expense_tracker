@@ -58,13 +58,17 @@ class SmsTransactionParser {
     }
     final text = note.toLowerCase();
     final transactionType = _transactionTypeFromSms(text);
-    if (_shouldIgnoreSms(text, hasTransactionSignal: transactionType != null)) {
+    final amount = _amountFromSms(note);
+    if (_shouldIgnoreSms(
+      text,
+      hasTransactionSignal: transactionType != null,
+      hasAmount: amount != null,
+    )) {
       return null;
     }
     if (transactionType == null) {
       return null;
     }
-    final amount = _amountFromSms(note);
     if (amount == null) {
       return null;
     }
@@ -161,35 +165,36 @@ SmsTransactionDraft? parseTransactionSms(String sms) {
 }
 
 String? _transactionTypeFromSms(String text) {
-  const debitWords = [
-    'debited',
-    'debit',
-    'dr',
-    'dr.',
-    'debit card',
-    'spent',
-    'paid',
-    'payment',
-    'withdrawn',
-    'purchase',
-    'sent',
-    'deducted',
-    'charged',
-    'txn',
+  final debitPatterns = [
+    RegExp(r'\bdebited\b'),
+    RegExp(r'\bdebit\b(?!\s+card\b)'),
+    RegExp(r'\bdr\.?(?=\s|$)'),
+    RegExp(r'\bspent\b'),
+    RegExp(r'\bpaid\b'),
+    RegExp(r'\bpayment\b'),
+    RegExp(r'\bwithdrawn\b'),
+    RegExp(r'\bwithdrawal\b'),
+    RegExp(r'\bpurchase\b'),
+    RegExp(r'\bused\b'),
+    RegExp(r'\bsent\b'),
+    RegExp(r'\btransferred\b'),
+    RegExp(r'\bdeducted\b'),
+    RegExp(r'\bcharged\b'),
+    RegExp(r'\btxn\b'),
   ];
-  const creditWords = [
-    'credited',
-    'credit',
-    'cr',
-    'cr.',
-    'received',
-    'deposited',
-    'refund',
-    'cashback',
-    'added',
+  final creditPatterns = [
+    RegExp(r'\bcredited\b'),
+    RegExp(r'\bcredit\b(?!\s+card\b)'),
+    RegExp(r'\bcr\.?(?=\s|$)'),
+    RegExp(r'\breceived\b'),
+    RegExp(r'\bdeposited\b'),
+    RegExp(r'\brefund(?:ed)?\b'),
+    RegExp(r'\bcashback\b'),
+    RegExp(r'\breversal\b'),
+    RegExp(r'\badded\b'),
   ];
-  final debitIndex = _firstKeywordIndex(text, debitWords);
-  final creditIndex = _firstKeywordIndex(text, creditWords);
+  final debitIndex = _firstPatternIndex(text, debitPatterns);
+  final creditIndex = _firstPatternIndex(text, creditPatterns);
   if (debitIndex == null && creditIndex == null) {
     return null;
   }
@@ -204,28 +209,41 @@ String? _transactionTypeFromSms(String text) {
       : TransactionTypes.expense;
 }
 
-bool _shouldIgnoreSms(String text, {required bool hasTransactionSignal}) {
-  const ignoredWords = [
+bool _shouldIgnoreSms(
+  String text, {
+  required bool hasTransactionSignal,
+  required bool hasAmount,
+}) {
+  const securityWords = [
     'otp',
     'one time password',
     'verification code',
     'do not share',
-    'statement',
-    'offer',
-    'discount',
-    'sale',
+    'security code',
+    'auth code',
   ];
+  if (securityWords.any(text.contains)) {
+    return true;
+  }
+  final hasTransactionWithAmount = hasTransactionSignal && hasAmount;
+  if (hasTransactionWithAmount) {
+    return false;
+  }
+  const ignoredWords = ['statement', 'offer', 'discount', 'sale'];
   if (ignoredWords.any(text.contains)) {
     return true;
   }
-  return !hasTransactionSignal &&
-      (text.contains('available balance') || text.contains('balance is'));
+  return text.contains('available balance') ||
+      text.contains('balance is') ||
+      text.contains('avl bal') ||
+      text.contains('account balance');
 }
 
-int? _firstKeywordIndex(String text, List<String> keywords) {
+int? _firstPatternIndex(String text, List<RegExp> patterns) {
   int? first;
-  for (final keyword in keywords) {
-    final index = text.indexOf(keyword);
+  for (final pattern in patterns) {
+    final match = pattern.firstMatch(text);
+    final index = match?.start ?? -1;
     if (index >= 0 && (first == null || index < first)) {
       first = index;
     }
@@ -236,11 +254,27 @@ int? _firstKeywordIndex(String text, List<String> keywords) {
 String? _amountFromSms(String sms) {
   final patterns = [
     RegExp(
+      r'\b(?:debited|debit|dr\.?|credited|credit|cr\.?|spent|paid|withdrawn|received|deposited|refund(?:ed)?|cashback|used|sent|transferred|deducted|charged|purchase)\b(?:(?!\b(?:bal|balance|available|avl)\b).){0,80}?\b(?:by|with|for|of|amount|amt)\s*(?:INR|Rs\.?|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'\b(?:debited|debit|dr\.?|credited|credit|cr\.?|spent|paid|withdrawn|received|deposited|sent|transferred|deducted|charged|used)\s+(?:INR|Rs\.?|₹)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'(?:INR|Rs\.?|₹)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s+(?:has\s+been\s+)?\b(?:debited|debit|dr\.?|credited|credit|cr\.?|spent|paid|withdrawn|received|deposited|sent|transferred|deducted|charged|used|txn)\b',
+      caseSensitive: false,
+    ),
+    RegExp(
+      r'\b([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:INR|Rs\.?)\s+(?:has\s+been\s+)?\b(?:debited|debit|dr\.?|credited|credit|cr\.?|spent|paid|withdrawn|received|deposited|sent|transferred|deducted|charged|used|txn)\b',
+      caseSensitive: false,
+    ),
+    RegExp(
       r'(?:INR|Rs\.?|₹)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)',
       caseSensitive: false,
     ),
     RegExp(
-      r'([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:INR|Rs\.?)',
+      r'\b([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:INR|Rs\.?)',
       caseSensitive: false,
     ),
   ];
@@ -302,20 +336,61 @@ String _fnv1a64(String value) {
 }
 
 DateTime? _dateFromSms(String sms) {
-  final patterns = [RegExp(r'\b(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})\b')];
-  for (final pattern in patterns) {
-    final match = pattern.firstMatch(sms);
-    if (match == null) {
-      continue;
+  final numericDate = RegExp(
+    r'\b(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})\b',
+  ).firstMatch(sms);
+  if (numericDate != null) {
+    final day = int.tryParse(numericDate.group(1)!);
+    final month = int.tryParse(numericDate.group(2)!);
+    final rawYear = int.tryParse(numericDate.group(3)!);
+    if (day != null && month != null && rawYear != null) {
+      final year = rawYear < 100 ? 2000 + rawYear : rawYear;
+      return DateTime(year, month, day);
     }
-    final day = int.tryParse(match.group(1)!);
-    final month = int.tryParse(match.group(2)!);
-    final rawYear = int.tryParse(match.group(3)!);
+  }
+
+  final textDate = RegExp(
+    r'\b(\d{1,2})\s*([A-Za-z]{3})\s*(\d{2,4})\b',
+  ).firstMatch(sms);
+  if (textDate != null) {
+    final day = int.tryParse(textDate.group(1)!);
+    final month = _monthFromText(textDate.group(2)!);
+    final rawYear = int.tryParse(textDate.group(3)!);
     if (day == null || month == null || rawYear == null) {
-      continue;
+      return null;
     }
     final year = rawYear < 100 ? 2000 + rawYear : rawYear;
     return DateTime(year, month, day);
+  }
+  return null;
+}
+
+int? _monthFromText(String value) {
+  switch (value.toLowerCase()) {
+    case 'jan':
+      return 1;
+    case 'feb':
+      return 2;
+    case 'mar':
+      return 3;
+    case 'apr':
+      return 4;
+    case 'may':
+      return 5;
+    case 'jun':
+      return 6;
+    case 'jul':
+      return 7;
+    case 'aug':
+      return 8;
+    case 'sep':
+      return 9;
+    case 'oct':
+      return 10;
+    case 'nov':
+      return 11;
+    case 'dec':
+      return 12;
   }
   return null;
 }

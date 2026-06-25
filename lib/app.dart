@@ -16,15 +16,19 @@ import 'screens/home/home_screen.dart';
 import 'screens/lock/app_lock_screen.dart';
 import 'screens/settings/export_screen.dart';
 import 'screens/settings/settings_screen.dart';
+import 'screens/settings/sms_compatibility_screen.dart';
 import 'screens/splash/splash_screen.dart';
 import 'screens/spendings/spendings_screen.dart';
 import 'screens/transactions/add_edit_transaction_screen.dart';
 import 'screens/transactions/provisional_transactions_screen.dart';
 import 'screens/transactions/transactions_screen.dart';
+import 'services/app_lock_service.dart';
 import 'services/provisional_notification_service.dart';
 import 'services/provisional_transaction_repository.dart';
+import 'services/category_service.dart';
 import 'services/settings_service.dart';
 import 'services/sms_transaction_service.dart';
+import 'services/transaction_service.dart';
 import 'theme/app_theme.dart';
 import 'widgets/bottom_nav.dart';
 
@@ -102,14 +106,23 @@ class AppLockGate extends StatefulWidget {
 }
 
 class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
+  final AppLockService _appLockService = AppLockService();
   late bool _unlocked;
+  late bool _showPrivacyCover;
+  bool _isResumed = true;
   bool _skipNextResumeLock = false;
+  bool _secureWindowEnabled = false;
+  DateTime? _backgroundedAt;
+
+  static const _secureWindowAlwaysOn = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _unlocked = !widget.settings.appLockEnabled;
+    _showPrivacyCover = widget.settings.appLockEnabled;
+    _syncSecureWindow();
   }
 
   @override
@@ -117,40 +130,149 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
     super.didUpdateWidget(oldWidget);
     if (!widget.settings.appLockEnabled) {
       _unlocked = true;
+      _showPrivacyCover = false;
+      _backgroundedAt = null;
+      _syncSecureWindow();
       return;
     }
     if (!oldWidget.settings.appLockEnabled && widget.settings.appLockEnabled) {
       _unlocked = true;
+      _showPrivacyCover = false;
     }
+    _syncSecureWindow();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && widget.settings.appLockEnabled) {
+    if (!widget.settings.appLockEnabled) {
+      _hidePrivacyCover();
+      return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      _isResumed = true;
       if (_skipNextResumeLock) {
         _skipNextResumeLock = false;
+        _syncSecureWindow();
         return;
       }
-      setState(() => _unlocked = false);
+      if (_shouldLockOnResume()) {
+        _lockAndCover();
+      } else {
+        _hidePrivacyCover();
+      }
+      _backgroundedAt = null;
+      return;
     }
+    _isResumed = false;
+    if (!_unlocked) {
+      _showPrivacyCoverForSnapshot();
+      return;
+    }
+    if (_unlocked &&
+        (state == AppLifecycleState.inactive ||
+            state == AppLifecycleState.hidden ||
+            state == AppLifecycleState.paused ||
+            state == AppLifecycleState.detached)) {
+      _backgroundedAt ??= DateTime.now();
+      _showPrivacyCoverForSnapshot();
+      if (widget.settings.appLockTimeout == Duration.zero && mounted) {
+        setState(() => _unlocked = false);
+      }
+      _syncSecureWindow();
+    }
+  }
+
+  bool _shouldLockOnResume() {
+    if (!_unlocked) {
+      return true;
+    }
+    final timeout = widget.settings.appLockTimeout;
+    if (timeout == Duration.zero) {
+      return true;
+    }
+    final backgroundedAt = _backgroundedAt;
+    if (backgroundedAt == null) {
+      return false;
+    }
+    return DateTime.now().difference(backgroundedAt) >= timeout;
+  }
+
+  void _showPrivacyCoverForSnapshot() {
+    if (mounted && !_showPrivacyCover) {
+      setState(() => _showPrivacyCover = true);
+    }
+    _syncSecureWindow();
+  }
+
+  void _hidePrivacyCover() {
+    if (mounted && _showPrivacyCover && _unlocked) {
+      setState(() => _showPrivacyCover = false);
+    }
+    _syncSecureWindow();
+  }
+
+  void _lockAndCover() {
+    if (mounted) {
+      setState(() {
+        _unlocked = false;
+        _showPrivacyCover = true;
+      });
+    }
+    _syncSecureWindow();
+  }
+
+  void _syncSecureWindow() {
+    final enabled =
+        _secureWindowAlwaysOn ||
+        (widget.settings.appLockEnabled && !_unlocked && _isResumed);
+    if (enabled == _secureWindowEnabled) {
+      return;
+    }
+    _secureWindowEnabled = enabled;
+    _appLockService.setSecureWindow(enabled);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_secureWindowEnabled && !_secureWindowAlwaysOn) {
+      _appLockService.setSecureWindow(false);
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.settings.appLockEnabled || _unlocked) {
-      return widget.child;
-    }
-    return AppLockScreen(
-      settings: widget.settings,
-      onSystemUnlockStarted: () => _skipNextResumeLock = true,
-      onUnlocked: () => setState(() => _unlocked = true),
+    return Stack(
+      children: [
+        widget.child,
+        if (_showPrivacyCover) const Positioned.fill(child: _PrivacyCover()),
+        if (widget.settings.appLockEnabled && !_unlocked && _isResumed)
+          Positioned.fill(
+            child: AppLockScreen(
+              settings: widget.settings,
+              onSystemUnlockStarted: () => _skipNextResumeLock = true,
+              onUnlocked: () {
+                setState(() {
+                  _backgroundedAt = null;
+                  _unlocked = true;
+                  _showPrivacyCover = false;
+                });
+                _syncSecureWindow();
+              },
+            ),
+          ),
+      ],
     );
+  }
+}
+
+class _PrivacyCover extends StatelessWidget {
+  const _PrivacyCover();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(color: Theme.of(context).scaffoldBackgroundColor);
   }
 }
 
@@ -170,6 +292,8 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final SmsTransactionService _smsTransactionService = SmsTransactionService();
+  final CategoryService _categoryService = CategoryService();
+  final TransactionService _transactionService = TransactionService();
   final ProvisionalTransactionRepository _provisionalRepository =
       ProvisionalTransactionRepository();
   final ProvisionalNotificationService _notificationService =
@@ -225,7 +349,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     _smsSubscription = _smsTransactionService.parsedTransactions.listen(
-      _saveProvisionalTransaction,
+      _saveSmsTransaction,
     );
   }
 
@@ -242,6 +366,50 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     await _stopSmsImport();
+  }
+
+  Future<void> _saveSmsTransaction(ParsedSmsTransaction parsed) async {
+    if (widget.settings.smsImportModeValue ==
+        SettingValues.smsImportMainTransaction) {
+      await _saveMainSmsTransaction(parsed);
+      return;
+    }
+    await _saveProvisionalTransaction(parsed);
+  }
+
+  Future<void> _saveMainSmsTransaction(ParsedSmsTransaction parsed) async {
+    final isIncome = parsed.transactionType == TransactionTypes.income;
+    final category = await _categoryService.findOrCreateSystemCategory(
+      name: isIncome ? 'Credit' : 'Debit',
+      type: isIncome ? CategoryTypes.income : CategoryTypes.expense,
+      icon: isIncome ? 'savings' : 'account_balance_wallet',
+      colorHex: isIncome ? '#2563EB' : '#0F766E',
+    );
+    final now = DateTime.now();
+    final transaction = TransactionModel()
+      ..title = category.name
+      ..amountMinor = parsed.amountMinor
+      ..note = parsed.note
+      ..transactionDate = parsed.smsReceivedAt
+      ..categoryId = category.id
+      ..subCategoryId = null
+      ..paymentMethod = parsed.paymentMethod
+      ..createdAt = now
+      ..updatedAt = now
+      ..transactionType = parsed.transactionType
+      ..debtLoanKind = null
+      ..parentTransactionId = null
+      ..partyCsv = null
+      ..excludeFromReports = false;
+    final saved = await _transactionService.saveSmsTransactionIfNew(
+      transaction,
+    );
+    if (!mounted || !saved) {
+      return;
+    }
+    setState(() {
+      _reloadToken++;
+    });
   }
 
   Future<void> _openTransactionForm({
@@ -380,6 +548,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     ).push<void>(AppRoute(builder: (_) => const ExportScreen()));
   }
 
+  Future<void> _openSmsCompatibilityScreen() async {
+    final changed = await Navigator.of(context).push<bool>(
+      AppRoute(
+        builder: (_) => SmsCompatibilityScreen(settings: widget.settings),
+      ),
+    );
+    if (changed == true && mounted) {
+      setState(() {
+        _reloadToken++;
+      });
+    }
+  }
+
   Widget _buildBody() {
     switch (_selectedIndex) {
       case 0:
@@ -422,6 +603,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           onOpenDebtLoan: () => _openDebtLoanScreen(),
           onOpenExport: _openExportScreen,
           onOpenProvisionalTransactions: _openProvisionalTransactionsScreen,
+          onOpenSmsCompatibility: _openSmsCompatibilityScreen,
           onSettingsChanged: () async {
             await widget.onSettingsChanged();
             if (mounted) {

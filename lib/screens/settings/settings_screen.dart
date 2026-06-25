@@ -6,13 +6,13 @@ import '../../core/currencies.dart';
 import '../../core/formatters.dart';
 import '../../models/app_settings.dart';
 import '../../navigation/app_route.dart';
-import '../../services/app_lock_service.dart';
 import '../../services/export_service.dart';
 import '../../services/provisional_notification_service.dart';
 import '../../services/settings_service.dart';
 import '../../services/sms_transaction_service.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/section_header.dart';
+import 'app_lock_settings_screen.dart';
 import 'select_currency_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -23,6 +23,7 @@ class SettingsScreen extends StatefulWidget {
     required this.onOpenDebtLoan,
     required this.onOpenExport,
     required this.onOpenProvisionalTransactions,
+    required this.onOpenSmsCompatibility,
   });
 
   final AppSettingsModel settings;
@@ -30,13 +31,13 @@ class SettingsScreen extends StatefulWidget {
   final VoidCallback onOpenDebtLoan;
   final VoidCallback onOpenExport;
   final VoidCallback onOpenProvisionalTransactions;
+  final VoidCallback onOpenSmsCompatibility;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final AppLockService _appLockService = AppLockService();
   final SettingsService _settingsService = SettingsService();
   final SmsTransactionService _smsTransactionService = SmsTransactionService();
   final ProvisionalNotificationService _notificationService =
@@ -48,16 +49,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late String _currency;
   late String _exportPath;
   late bool _smsImportEnabled;
+  late String _smsImportMode;
   late bool _appLockEnabled;
+  late String _appLockTimeoutMode;
   String _defaultExportPath = '';
-  bool _deviceLockAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _syncFromWidget();
     _loadDefaultExportPath();
-    _loadDeviceLockAvailability();
   }
 
   @override
@@ -75,7 +76,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _currency = widget.settings.currency;
     _exportPath = widget.settings.exportPath ?? '';
     _smsImportEnabled = widget.settings.smsImportEnabled;
+    _smsImportMode = widget.settings.smsImportModeValue;
     _appLockEnabled = widget.settings.appLockEnabled;
+    _appLockTimeoutMode = widget.settings.appLockTimeoutModeValue;
   }
 
   Future<void> _loadDefaultExportPath() async {
@@ -84,14 +87,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     setState(() => _defaultExportPath = path);
-  }
-
-  Future<void> _loadDeviceLockAvailability() async {
-    final available = await _appLockService.canUseDeviceLock();
-    if (!mounted) {
-      return;
-    }
-    setState(() => _deviceLockAvailable = available);
   }
 
   Future<void> _save() async {
@@ -106,7 +101,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ..exportPath = _exportPath.trim().isEmpty ? null : _exportPath.trim()
         ..smsImportEnabled = _smsImportEnabled
         ..appLockEnabled = _appLockEnabled
-        ..createdAt = widget.settings.createdAt;
+        ..createdAt = widget.settings.createdAt
+        ..transactionsFromSmsMode = _smsImportMode
+        ..appLockTimeoutMode = _appLockTimeoutMode;
       await _settingsService.save(settings);
       await widget.onSettingsChanged();
     } finally {
@@ -205,18 +202,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await _save();
   }
 
+  Future<void> _openAppLockSettings() async {
+    await Navigator.of(context).push<void>(
+      AppRoute(
+        builder: (_) => AppLockSettingsScreen(
+          settings: widget.settings,
+          onSettingsChanged: widget.onSettingsChanged,
+        ),
+      ),
+    );
+    await widget.onSettingsChanged();
+  }
+
   Future<void> _toggleSmsImport(bool enabled) async {
     if (!enabled) {
       setState(() => _smsImportEnabled = false);
       await _save();
       return;
     }
+    await _chooseSmsImportMode();
+  }
+
+  Future<void> _chooseSmsImportMode() async {
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Save SMS Transactions',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 12),
+              for (final option in _smsImportModeOptions)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(option.label),
+                  trailing: option.value == _smsImportMode
+                      ? Icon(
+                          Icons.check_circle,
+                          color: Theme.of(context).colorScheme.primary,
+                        )
+                      : null,
+                  onTap: () => Navigator.of(context).pop(option.value),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (value == null || !mounted) {
+      return;
+    }
+    await _applySmsImportMode(value);
+  }
+
+  Future<void> _applySmsImportMode(String mode) async {
+    if (!_smsImportEnabled) {
+      final shouldEnable = await _confirmSmsImport(mode);
+      if (shouldEnable != true || !mounted) {
+        return;
+      }
+    }
+    final granted = await _ensureSmsImportPermissions(mode);
+    if (!mounted || !granted) {
+      return;
+    }
+    setState(() {
+      _smsImportEnabled = true;
+      _smsImportMode = mode;
+    });
+    await _save();
+  }
+
+  Future<bool?> _confirmSmsImport(String mode) async {
+    final modeText = mode == SettingValues.smsImportMainTransaction
+        ? 'save them directly as Debit or Credit transactions.'
+        : 'keep them as provisional transactions for review. Nothing is added to reports until you save it.';
     final shouldEnable = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Enable Transactions from SMS'),
-        content: const Text(
-          'Expense Tracker will detect new bank transaction SMS and keep them as provisional transactions for review. Nothing is added to reports until you save it.',
+        content: Text(
+          'Expense Tracker will detect new bank transaction SMS and $modeText',
         ),
         actions: [
           TextButton(
@@ -230,15 +305,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     );
-    if (shouldEnable != true || !mounted) {
-      return;
-    }
+    return shouldEnable;
+  }
+
+  Future<bool> _ensureSmsImportPermissions(String mode) async {
     var granted = await _smsTransactionService.hasSmsPermission();
     if (!granted) {
       granted = await _smsTransactionService.requestSmsPermission();
     }
     if (!mounted) {
-      return;
+      return false;
     }
     if (!granted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -246,14 +322,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           content: Text('Transactions from SMS permission was not granted.'),
         ),
       );
-      return;
+      return false;
+    }
+    if (mode != SettingValues.smsImportProvisional) {
+      return true;
     }
     var notificationGranted = await _notificationService.hasPermission();
     if (!notificationGranted) {
       notificationGranted = await _notificationService.requestPermission();
     }
     if (!mounted) {
-      return;
+      return false;
     }
     if (!notificationGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -261,42 +340,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           content: Text('Notification permission was not granted.'),
         ),
       );
-      return;
+      return false;
     }
-    setState(() => _smsImportEnabled = true);
-    await _save();
-  }
-
-  Future<void> _toggleAppLock(bool enabled) async {
-    if (!enabled) {
-      setState(() => _appLockEnabled = false);
-      await _save();
-      return;
-    }
-    final available = await _appLockService.canUseDeviceLock();
-    if (!mounted) {
-      return;
-    }
-    if (!available) {
-      setState(() => _deviceLockAvailable = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Set an Android screen PIN, pattern, or password first.',
-          ),
-        ),
-      );
-      return;
-    }
-    final authenticated = await _appLockService.authenticateDeviceLock();
-    if (!mounted || !authenticated) {
-      return;
-    }
-    setState(() {
-      _appLockEnabled = true;
-      _deviceLockAvailable = true;
-    });
-    await _save();
+    return true;
   }
 
   @override
@@ -337,6 +383,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   value: 'Review bank SMS transactions',
                   saving: false,
                   onTap: widget.onOpenProvisionalTransactions,
+                ),
+                const Divider(height: 1),
+                _SettingTile(
+                  icon: Icons.sms_outlined,
+                  title: 'SMS Compatibility',
+                  value: 'Test bank SMS parsing',
+                  saving: false,
+                  onTap: widget.onOpenSmsCompatibility,
                 ),
               ],
             ),
@@ -412,28 +466,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   onSecondaryTap: _resetExportPath,
                 ),
                 const Divider(height: 1),
-                _SwitchSettingTile(
+                _SmsImportSettingTile(
                   icon: Icons.sms_outlined,
                   title: 'Transactions from SMS',
                   value: _smsImportEnabled,
                   description: _smsImportEnabled
-                      ? 'Bank SMS saved for review'
+                      ? _smsImportModeDescription(_smsImportMode)
                       : 'Off',
                   saving: _saving,
+                  onTap: _chooseSmsImportMode,
                   onChanged: _toggleSmsImport,
                 ),
                 const Divider(height: 1),
-                _SwitchSettingTile(
+                _SettingTile(
                   icon: Icons.lock_outline_rounded,
                   title: 'App lock',
-                  value: _appLockEnabled,
-                  description: _appLockEnabled
-                      ? 'Android screen lock required'
-                      : (_deviceLockAvailable
-                            ? 'Off'
-                            : 'Set screen lock first'),
+                  value: _appLockDescription(
+                    enabled: _appLockEnabled,
+                    timeoutMode: _appLockTimeoutMode,
+                  ),
                   saving: _saving,
-                  onChanged: _toggleAppLock,
+                  onTap: _openAppLockSettings,
                 ),
               ],
             ),
@@ -519,13 +572,14 @@ class _SettingTile extends StatelessWidget {
   }
 }
 
-class _SwitchSettingTile extends StatelessWidget {
-  const _SwitchSettingTile({
+class _SmsImportSettingTile extends StatelessWidget {
+  const _SmsImportSettingTile({
     required this.icon,
     required this.title,
     required this.description,
     required this.value,
     required this.saving,
+    required this.onTap,
     required this.onChanged,
   });
 
@@ -534,51 +588,56 @@ class _SwitchSettingTile extends StatelessWidget {
   final String description;
   final bool value;
   final bool saving;
+  final VoidCallback onTap;
   final ValueChanged<bool> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: Theme.of(
-              context,
-            ).colorScheme.primary.withValues(alpha: 0.12),
-            child: Icon(icon, color: Theme.of(context).colorScheme.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: mutedColor),
-                ),
-              ],
+    return InkWell(
+      onTap: saving ? null : onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.12),
+              child: Icon(icon, color: Theme.of(context).colorScheme.primary),
             ),
-          ),
-          saving
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Switch.adaptive(value: value, onChanged: onChanged),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodySmall?.copyWith(color: mutedColor),
+                  ),
+                ],
+              ),
+            ),
+            saving
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Switch.adaptive(value: value, onChanged: onChanged),
+          ],
+        ),
       ),
     );
   }
@@ -595,6 +654,14 @@ const _themeOptions = [
   _SettingOption(SettingValues.themeSystem, 'System'),
   _SettingOption(SettingValues.themeLight, 'Light'),
   _SettingOption(SettingValues.themeDark, 'Dark'),
+];
+
+const _smsImportModeOptions = [
+  _SettingOption(
+    SettingValues.smsImportProvisional,
+    'Provisional transactions',
+  ),
+  _SettingOption(SettingValues.smsImportMainTransaction, 'Main transactions'),
 ];
 
 List<_SettingOption> _amountFormatOptions(String currency) => [
@@ -653,6 +720,35 @@ String _amountFormatExample(String amountFormat, String currency) {
     currency: currency,
     amountFormat: amountFormat,
   );
+}
+
+String _smsImportModeDescription(String mode) {
+  if (mode == SettingValues.smsImportMainTransaction) {
+    return 'Save as Debit or Credit';
+  }
+  return 'Save for review';
+}
+
+String _appLockDescription({
+  required bool enabled,
+  required String timeoutMode,
+}) {
+  if (!enabled) {
+    return 'Off';
+  }
+  return 'Device unlock • ${_appLockTimeoutDescription(timeoutMode)}';
+}
+
+String _appLockTimeoutDescription(String mode) {
+  switch (mode) {
+    case SettingValues.appLockAfter1Minute:
+      return 'Lock after 1 minute';
+    case SettingValues.appLockAfter30Minutes:
+      return 'Lock after 30 minutes';
+    case SettingValues.appLockImmediate:
+    default:
+      return 'Lock when app closes';
+  }
 }
 
 String _dateFormatExample(String dateFormat) {

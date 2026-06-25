@@ -35,6 +35,36 @@ class CategoryService {
     });
   }
 
+  Future<CategoryModel> findOrCreateSystemCategory({
+    required String name,
+    required String type,
+    required String icon,
+    required String colorHex,
+  }) async {
+    final isar = await IsarService.instance.database;
+    final existing = await isar.categoryModels
+        .filter()
+        .nameEqualTo(name, caseSensitive: false)
+        .and()
+        .typeEqualTo(type)
+        .findFirst();
+    if (existing != null) {
+      return existing;
+    }
+    final category = CategoryModel()
+      ..name = name
+      ..type = type
+      ..parentCategoryId = null
+      ..icon = icon
+      ..colorHex = colorHex
+      ..isSystem = true
+      ..createdAt = DateTime.now();
+    await isar.writeTxn(() async {
+      await isar.categoryModels.put(category);
+    });
+    return category;
+  }
+
   Future<void> delete(CategoryModel category) async {
     final isar = await IsarService.instance.database;
     final categoryUsage = await isar.transactionModels
